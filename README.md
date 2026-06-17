@@ -173,6 +173,15 @@ messages = [
 }
 ```
 
+### `POST /api/config/test`
+一键测试当前 API 配置是否可用。使用最小请求（`"请只回复 OK"`）验证连通性，不调用商品分析逻辑。
+
+| 场景 | 返回 |
+|------|------|
+| 未配置 API Key | `{"success": false, "message": "未配置 API Key", "mode": "mock"}` |
+| API 调用失败 | `{"success": false, "message": "认证失败/连接超时/模型不存在...", "mode": "error"}` |
+| 调用成功 | `{"success": true, "message": "API 配置可用", "mode": "real_api", "model": "xxx"}` |
+
 ### `POST /api/analyze`
 支持 `multipart/form-data`：
 
@@ -203,12 +212,13 @@ messages = [
 - `"real_api"`：来自真实 API 调用
 - `"mock"`：来自 Mock 演示模式
 
-## 当前功能（v2.0）
+## 当前功能（v1.1）
 
 - [x] 首页包含文件上传和 URL 输入两种方式
 - [x] 上传商品截图或输入链接进行分析
 - [x] Mock 模式：无需 API Key 即可演示完整流程
 - [x] 真实模式：支持 OpenAI Compatible API（GPT / DeepSeek / Qwen 等）
+- [x] **一键检测 API 配置**：点击"测试 API 配置"验证连通性
 - [x] **前端 UI 配置 API Key、Base URL、Model、Extra Prompt**
 - [x] **三层提示词结构：BASE_SYSTEM_PROMPT + EXTRA_PROMPT + USER_PROMPT**
 - [x] **OpenAI SDK 调用，支持 OpenAI Compatible 协议**
@@ -220,6 +230,7 @@ messages = [
 - [x] 密码框隐藏 API Key，不返回到前端
 - [x] API 调用失败自动降级到 Mock 模式
 - [x] 响应式设计，移动端友好
+- [x] 保存配置与测试 API 分离设计
 
 ## 后续可扩展方向
 

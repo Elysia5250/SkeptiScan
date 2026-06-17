@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="反噶韭菜商品风险分析工具",
     description="上传商品截图或输入商品链接，系统自动识别可疑营销话术并生成风险分析报告",
-    version="2.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -65,7 +65,7 @@ async def root():
     """健康检查接口，返回项目状态"""
     return {
         "name": "反噶韭菜商品风险分析工具",
-        "version": "2.0.0",
+        "version": "1.1.0",
         "status": "running",
         "timestamp": datetime.now().isoformat(),
     }
@@ -80,12 +80,6 @@ async def save_config(
 ):
     """
     保存运行时 API 配置（不写入数据库，仅存内存）
-
-    - API Key 可以为空
-    - Base URL 为空时使用默认值
-    - Model 为空时使用默认值
-    - Extra Prompt 可以为空
-    - 不把完整 API Key 返回给前端
     """
     set_runtime_config(
         base_url=base_url,
@@ -115,6 +109,93 @@ async def get_config_status():
     }
 
 
+@app.post("/api/config/test")
+async def test_api_config():
+    """
+    一键测试 API 配置是否可用
+
+    使用当前运行时配置中的 base_url、api_key、model，
+    发起一次最小测试请求验证连通性。
+
+    不会调用商品分析 prompt，不会把 API Key 返回给前端。
+    """
+    config = get_ai_config()
+    api_key = config["api_key"]
+    base_url = config["base_url"]
+    model = config["model"]
+
+    # 如果 API Key 为空，直接返回
+    if not api_key.strip():
+        return {
+            "success": False,
+            "message": "未配置 API Key",
+            "mode": "mock",
+        }
+
+    # 发起最小测试请求
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=30.0,
+        )
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "请只回复 OK"}],
+            temperature=0,
+            max_tokens=10,
+        )
+
+        # 检查是否正常返回
+        reply = response.choices[0].message.content.strip()
+        if reply:
+            return {
+                "success": True,
+                "message": "API 配置可用",
+                "mode": "real_api",
+                "model": model,
+            }
+        else:
+            return {
+                "success": False,
+                "message": "API 返回内容为空",
+                "mode": "error",
+                "model": model,
+            }
+
+    except Exception as e:
+        # 提取简短的错误摘要，不暴露 API Key
+        error_msg = str(e)
+        # 截取关键错误信息，避免过长
+        if len(error_msg) > 80:
+            error_msg = error_msg[:80] + "..."
+
+        # 常见的错误类型映射为友好信息
+        error_lower = str(e).lower()
+        if "401" in error_lower or "unauthorized" in error_lower or "auth" in error_lower:
+            friendly_msg = "认证失败，请检查 API Key 是否正确"
+        elif "404" in error_lower or "not found" in error_lower:
+            friendly_msg = "模型不存在或 Base URL 错误，请检查模型名和接口地址"
+        elif "timeout" in error_lower or "timed out" in error_lower:
+            friendly_msg = "连接超时，请检查 Base URL 是否可访问"
+        elif "connection" in error_lower or "connect" in error_lower or "resolve" in error_lower:
+            friendly_msg = "无法连接，请检查 Base URL 和网络设置"
+        elif "429" in error_lower or "rate limit" in error_lower:
+            friendly_msg = "请求频率过高，请稍后再试"
+        else:
+            friendly_msg = f"API 调用失败：{error_msg}"
+
+        return {
+            "success": False,
+            "message": friendly_msg,
+            "mode": "error",
+            "model": model,
+        }
+
+
 @app.post("/api/analyze")
 async def analyze(
     image: UploadFile = File(None, description="商品截图（可选）"),
@@ -122,11 +203,6 @@ async def analyze(
 ):
     """
     商品风险分析接口
-
-    支持两种输入方式：
-    1. 上传商品截图（image）
-    2. 输入商品链接（url）
-    两种方式可以同时提供，也可以只提供一种
 
     返回格式：
     {

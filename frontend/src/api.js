@@ -73,6 +73,15 @@ export async function getConfigStatus() {
 }
 
 /**
+ * 一键测试 API 配置是否可用
+ * @returns {Promise<object>} { success, message, mode, model }
+ */
+export async function testApiConfig() {
+  const response = await api.post('/api/config/test')
+  return response.data
+}
+
+/**
  * 检查后端服务状态
  * @returns {Promise<object>}
  */

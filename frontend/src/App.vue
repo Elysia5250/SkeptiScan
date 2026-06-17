@@ -74,13 +74,19 @@
           ></textarea>
         </div>
 
-        <!-- Save button -->
-        <button class="config-save-btn" :disabled="configSaving" @click="handleSaveConfig">
-          <span v-if="configSaving" class="loading-spinner-small"></span>
-          <span>{{ configSaving ? '保存中...' : '💾 保存配置' }}</span>
-        </button>
+        <!-- Save + Test buttons -->
+        <div class="config-btn-row">
+          <button class="config-save-btn" :disabled="configSaving" @click="handleSaveConfig">
+            <span v-if="configSaving" class="loading-spinner-small"></span>
+            <span>{{ configSaving ? '保存中...' : '💾 保存配置' }}</span>
+          </button>
+          <button class="config-test-btn" :disabled="configTesting" @click="handleTestApiConfig">
+            <span v-if="configTesting" class="loading-spinner-small"></span>
+            <span>{{ configTesting ? '测试中...' : '🧪 测试 API 配置' }}</span>
+          </button>
+        </div>
 
-        <!-- Status display -->
+        <!-- Status / Test result display -->
         <div v-if="configStatusMessage" class="config-status" :class="configStatusType">
           {{ configStatusMessage }}
         </div>
@@ -263,7 +269,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { analyzeProduct, saveConfig, getConfigStatus } from './api.js'
+import { analyzeProduct, saveConfig, getConfigStatus, testApiConfig } from './api.js'
 
 // =====================================================
 // 状态：分析流程
@@ -282,6 +288,7 @@ const analysisMode = ref(null) // 'real_api' | 'mock'
 // =====================================================
 const configExpanded = ref(false)
 const configSaving = ref(false)
+const configTesting = ref(false)
 const configStatusMessage = ref('')
 const configStatusType = ref('success')
 const showApiKey = ref(false)
@@ -360,6 +367,27 @@ const riskIcon = computed(() => {
 // =====================================================
 // 方法：配置
 // =====================================================
+async function handleTestApiConfig() {
+  configTesting.value = true
+  configStatusMessage.value = ''
+
+  try {
+    const result = await testApiConfig()
+    if (result.success) {
+      configStatusMessage.value = `✅ API 配置可用（模型：${result.model}）`
+      configStatusType.value = 'success'
+    } else {
+      configStatusMessage.value = `❌ ${result.message}`
+      configStatusType.value = 'error'
+    }
+  } catch (err) {
+    configStatusMessage.value = '❌ 测试请求失败：' + (err.response?.data?.detail || err.message)
+    configStatusType.value = 'error'
+  } finally {
+    configTesting.value = false
+  }
+}
+
 async function handleSaveConfig() {
   configSaving.value = true
   configStatusMessage.value = ''
@@ -610,6 +638,35 @@ async function startAnalysis() {
 
 .config-save-btn:hover:not(:disabled) {
   background: #2d9249;
+}
+
+.config-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.config-btn-row .config-save-btn,
+.config-btn-row .config-test-btn {
+  flex: 1;
+}
+
+.config-test-btn {
+  padding: 10px 20px;
+  background: #1a73e8;
+  color: white;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.config-test-btn:hover:not(:disabled) {
+  background: #1557b0;
 }
 
 .config-status {
