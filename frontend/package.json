@@ -1,0 +1,20 @@
+{
+  "name": "anti-leek-checker-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "反噶韭菜商品风险分析工具 - 前端",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.3.8",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.5.1",
+    "vite": "^5.0.4"
+  }
+}

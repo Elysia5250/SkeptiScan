@@ -1,0 +1,20 @@
+# FastAPI + 服务器
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+
+# 数据库
+sqlalchemy==2.0.23
+
+# 环境变量
+python-dotenv==1.0.0
+
+# HTTP 请求 / OpenAI SDK
+httpx==0.25.2
+openai==1.6.1
+
+# 图片处理
+Pillow==10.1.0
+
+# 可选：Playwright 截图（后续扩展用）
+# playwright==1.40.0
