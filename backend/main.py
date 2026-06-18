@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="反噶韭菜商品风险分析工具",
     description="上传商品截图或输入商品链接，系统自动识别可疑营销话术并生成风险分析报告",
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -65,7 +65,7 @@ async def root():
     """健康检查接口，返回项目状态"""
     return {
         "name": "反噶韭菜商品风险分析工具",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "status": "running",
         "timestamp": datetime.now().isoformat(),
     }
