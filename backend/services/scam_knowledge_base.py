@@ -84,6 +84,23 @@ PSEUDO_TERMS: dict[str, tuple[str, str]] = {
     "统计显示": ("data_fraud", "统计数据需说明样本量和收集方法"),
     "用户反馈": ("data_fraud", "用户反馈不等于科学证据"),
     "内部数据": ("data_fraud", "不可验证的内部数据可能为捏造"),
+    # 偷换概念
+    "引用非本品": ("data_fraud", "引用不直接相关的文献作为证据，是偷换概念的典型手法"),
+    "非本产品": ("data_fraud", "明确声明研究与本产品无关，仍用于暗示效果"),
+    "非临床": ("data_fraud", "非临床试验数据不能作为人体效果证据"),
+    "体外实验": ("data_fraud", "体外实验不能直接推论人体效果"),
+    "动物实验": ("data_fraud", "动物实验结果不能直接推论人体"),
+    "实验室数据": ("data_fraud", "实验室条件与人体环境差异巨大"),
+    "细胞实验": ("data_fraud", "细胞层面的效果不等于人体整体效果"),
+    # 让步免责
+    "不替代药品": ("medical", "让步修辞：先声明不替代药品，再暗示效果"),
+    "不替代药物": ("medical", "让步修辞：先声明不替代药物，再暗示效果"),
+    "不能替代": ("medical", "让步修辞：先声明不能替代，再暗示效果"),
+    "不具备治疗": ("medical", "先声明不具备治疗功能，再暗示有效"),
+    "不治疗": ("medical", "先声明不治疗，再暗示效果改善"),
+    "不做疗效保证": ("medical", "先说不做保证，再用统计数据暗示效果"),
+    "不承诺": ("medical", "先声明不承诺，再暗示效果有保障"),
+    "非医疗器械": ("medical", "先声明不是医疗器械，再暗示治疗功效"),
 }
 
 # ---------------------------------------------------------------------------
@@ -104,6 +121,26 @@ LEGIT_SIGNALS: list[tuple[re.Pattern, str, int]] = [
 # ---------------------------------------------------------------------------
 # 复合风险模式（正则）
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 让步免责信号（模型容易遗漏的高难度模式）
+# ---------------------------------------------------------------------------
+
+CONCESSION_PATTERNS: list[tuple[str, re.Pattern, str]] = [
+    ("citation_fraud", re.compile(r'(引用|根据|基于|来自).{0,15}(文献|研究|论文|数据|报告|统计).{0,30}(非本|不针对|综合|相关|公开|独立)'),
+     "引用非本品研究作证据——典型偷换概念"),
+    ("lab_to_human", re.compile(r'(体外|细胞|动物|实验室).{0,10}(实验|研究|数据|显示|表明).{0,30}(有效|改善|抑制|促进|延缓)'),
+     "体外/动物实验数据暗示人体效果——偷换概念"),
+    ("data_without_method", re.compile(r'有效率.{0,3}\d+(%|％|\.\d).{0,20}(?!(样本|对照|随机|双盲|RCT|临床试))'),
+     "有效率数据缺少样本量和控制组信息"),
+    ("concession_followed_by_hint", re.compile(r'(不能|不替代|不具备|不是|不做).{0,15}(药|治疗|医疗|保证|承诺).{0,30}(但|不过|然而|同时|此外|也).{0,20}(效果|改善|有效|帮助|提升)'),
+     "让步免责+效果暗示——典型软性忽悠手法"),
+    ("concession_then_data", re.compile(r'(不能|不替代|不是|不具备).{0,15}(药|治疗|医疗).{0,40}\d+%'),
+     "先声明不替代药品，再抛有效率数据——免责掩护"),
+    ("no_claim_then_hint", re.compile(r'(不(夸大|承诺|保证|做)).{0,20}(但|不过|然而).{0,20}(研究|统计|反馈|数据)'),
+     "先说不夸大，再用模糊数据暗示效果"),
+]
+
 
 RED_FLAG_PATTERNS: list[tuple[str, re.Pattern, str]] = [
     ("bait_free_trial", re.compile(r'免费.{0,10}(领|送|得).{0,20}(仅需|只需|付)(运费|邮费|快递费|检测费)'),
@@ -132,6 +169,18 @@ def scan_text(text: str) -> dict:
 
     Returns:
         {
+            "pseudo_terms": [...],
+            "legit_signals": [...],
+            "red_flags": [...],
+            "concession_flags": [...],  ← 新增：让步/偷换概念信号
+            "score_estimates": {...}
+        }
+    """
+    """
+    扫描文本，返回匹配的 KB 条目
+
+    Returns:
+        {
             "pseudo_terms": [("量子共振", "pseudo", "说明"), ...],  # 最多5个
             "legit_signals": [("正规药品批准文号，可查", -5), ...],
             "red_flags": [("bait_free_trial", "免费试用+隐藏费用"), ...],
@@ -141,7 +190,7 @@ def scan_text(text: str) -> dict:
     if not text:
         return {"pseudo_terms": [], "legit_signals": [], "red_flags": [], "score_estimates": {}}
 
-    result = {"pseudo_terms": [], "legit_signals": [], "red_flags": [], "score_estimates": {}}
+    result = {"pseudo_terms": [], "legit_signals": [], "red_flags": [], "concession_flags": [], "score_estimates": {}}
 
     # 伪科学术语匹配
     seen_terms = set()
@@ -158,6 +207,11 @@ def scan_text(text: str) -> dict:
     for pattern, desc, points in LEGIT_SIGNALS:
         if pattern.search(text):
             result["legit_signals"].append((desc, points))
+
+    # 让步/偷换概念信号（高难度漏报模式）
+    for name, pattern, desc in CONCESSION_PATTERNS:
+        if pattern.search(text):
+            result["concession_flags"].append((name, desc))
 
     # 复合风险模式
     for name, pattern, desc in RED_FLAG_PATTERNS:
@@ -184,28 +238,48 @@ def scan_text(text: str) -> dict:
 
 
 def build_kb_context(kb_result: dict) -> str:
-    """将 KB 扫描结果格式化为提示词片段"""
-    parts = []
+    """将 KB 扫描结果格式化为提示词片段，含风险等级和操作指引"""
+    parts = ["【系统预检报告】"]
     pseudo = kb_result.get("pseudo_terms", [])
     signals = kb_result.get("legit_signals", [])
     flags = kb_result.get("red_flags", [])
+    concession = kb_result.get("concession_flags", [])
 
+    # 高风险让步/偷换概念信号（最优先提示）
+    if concession:
+        parts.append("⚠️ 检测到高风险营销手法（模型易漏报）：")
+        for name, desc in concession[:3]:
+            parts.append(f"  🚩 {desc}")
+
+    # 伪科学术语
     if pseudo:
-        parts.append("【系统预检发现的风险信号】")
-        for term, cat, expl in pseudo[:5]:
-            parts.append(f"  - 「{term}」({cat}): {expl}")
+        parts.append("📛 检测到风险术语：")
+        cats = {}
+        for term, cat, expl in pseudo[:6]:
+            cats.setdefault(cat, []).append(term)
+        for cat, terms in cats.items():
+            label = {"pseudo": "伪科学", "medical": "虚假医疗", "authority": "虚假背书",
+                     "mlm": "传销", "data_fraud": "数据欺诈"}.get(cat, cat)
+            parts.append(f"  [{label}] {'、'.join(terms)}")
 
+    # 复合风险模式
     if flags:
-        parts.append("【系统预检发现的可疑营销模式】")
+        parts.append("🎯 检测到可疑营销模式：")
         for name, desc in flags[:3]:
             parts.append(f"  - {desc}")
 
+    # 可信信号（减分项）
     if signals:
-        parts.append("【系统预检发现的可信信号】")
+        parts.append("✅ 检测到可信信号：")
         for desc, pts in signals[:3]:
             parts.append(f"  - {desc} ({pts}分)")
 
-    if not pseudo and not flags and not signals:
-        parts.append("【系统预检】未发现明显已知风险信号，需进一步分析。")
+    if not pseudo and not flags and not concession and not signals:
+        parts.append("未发现明显风险信号，需进一步分析。")
+
+    # 指导建议
+    if concession:
+        parts.append("💡 评分提示：让步免责是典型软性忽悠手法，"
+                     "「引用非本品研究」属于数据欺诈，建议在评分时参考 Checklist 第 6 项。")
 
     return "\n".join(parts)
