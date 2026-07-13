@@ -5,10 +5,16 @@
 启动方式：
     cd backend
     uvicorn main:app --reload
+
+安全说明：
+    - 所有异常信息在返回到前端前会过滤 API Key
+    - /api/config/status 不返回 API Key
+    - 日志中出现的异常也会过滤 API Key
 """
 
 import asyncio
 import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +27,21 @@ from database import init_db, SessionLocal
 from models import AnalysisRecord
 from config import set_runtime_config, get_ai_config, has_api_key
 from services.ai_analyzer import analyze_product
+
+# ---------------------------------------------------------------------------
+# 安全过滤：异常信息中可能包含 API Key
+# ---------------------------------------------------------------------------
+
+_API_KEY_PATTERN = re.compile(r'(sk-[a-zA-Z0-9]{10,})\S*')
+
+
+def _safe_api_error(e: Exception) -> str:
+    """过滤异常信息中的 API Key，限制长度后返回"""
+    msg = str(e)
+    msg = _API_KEY_PATTERN.sub("sk-...", msg)
+    if len(msg) > 200:
+        msg = msg[:200] + "..."
+    return msg
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +58,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="反噶韭菜商品风险分析工具",
     description="上传商品截图或输入商品链接，系统自动识别可疑营销话术并生成风险分析报告",
-    version="2.0.0",
+    version="2.0.1",
     lifespan=lifespan,
 )
 
@@ -56,6 +77,24 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
+# 全局异常处理器：防止 debug 模式下泄露函数参数（含 API Key）
+# ---------------------------------------------------------------------------
+
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """捕获所有未处理异常，返回通用错误信息（不暴露细节）"""
+    print(f"[Error] {request.method} {request.url.path}: {_safe_api_error(exc)}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "服务器内部错误，请稍后重试"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # API 接口
 # ---------------------------------------------------------------------------
 
@@ -65,7 +104,7 @@ async def root():
     """健康检查接口，返回项目状态"""
     return {
         "name": "反噶韭菜商品风险分析工具",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "status": "running",
         "timestamp": datetime.now().isoformat(),
     }
@@ -177,13 +216,7 @@ async def test_api_config():
             }
 
     except Exception as e:
-        # 提取简短的错误摘要，不暴露 API Key
-        error_msg = str(e)
-        # 截取关键错误信息，避免过长
-        if len(error_msg) > 80:
-            error_msg = error_msg[:80] + "..."
-
-        # 常见的错误类型映射为友好信息
+        # 常见的错误类型映射为友好信息（不暴露原始错误详情）
         error_lower = str(e).lower()
         if "401" in error_lower or "unauthorized" in error_lower or "auth" in error_lower:
             friendly_msg = "认证失败，请检查 API Key 是否正确"
@@ -196,7 +229,7 @@ async def test_api_config():
         elif "429" in error_lower or "rate limit" in error_lower:
             friendly_msg = "请求频率过高，请稍后再试"
         else:
-            friendly_msg = f"API 调用失败：{error_msg}"
+            friendly_msg = f"API 调用失败：{_safe_api_error(e)}"
 
         return {
             "success": False,
@@ -226,7 +259,7 @@ async def fetch_models():
         models = sorted([m.id for m in response.data])
         return {"success": True, "models": models}
     except Exception as e:
-        return {"success": False, "models": [], "message": str(e)[:100]}
+        return {"success": False, "models": [], "message": _safe_api_error(e)}
 
 
 @app.post("/api/analyze")

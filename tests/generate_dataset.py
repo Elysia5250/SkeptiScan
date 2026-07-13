@@ -10,8 +10,8 @@ D) 让步/钓鱼型广告        — scam
 E) 正常商品              — not_scam
 
 Usage:
-    python generate_dataset.py --key sk-xxx          # LLM generates rich variations
-    python generate_dataset.py                        # fallback templates
+    export OPENAI_API_KEY=sk-xxx                     # set via env var (safe, not visible in ps)
+    python generate_dataset.py                        # uses env var or fallback templates
 """
 
 import argparse
@@ -223,13 +223,15 @@ Guidelines:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--key", default="", help="API key")
-    parser.add_argument("--count", type=int, default=100)
-    parser.add_argument("--api", default="https://api.deepseek.com")
-    parser.add_argument("--model", default="deepseek-v4-flash")
+    parser.add_argument("--count", type=int, default=100, help="Number of cases to generate")
+    parser.add_argument("--api", default="https://api.deepseek.com",
+                        help="API base URL (default: https://api.deepseek.com)")
+    parser.add_argument("--model", default="deepseek-v4-flash",
+                        help="Model name (default: deepseek-v4-flash)")
     args = parser.parse_args()
 
-    key = args.key
+    # 从环境变量读取 API Key（安全：不会出现在 ps 输出中）
+    key = os.environ.get("OPENAI_API_KEY", "")
     if not key:
         try:
             from config import get_ai_config, has_api_key

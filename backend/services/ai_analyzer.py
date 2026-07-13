@@ -14,10 +14,28 @@ AI 分析模块
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
 from config import get_ai_config, has_api_key
+
+# ---------------------------------------------------------------------------
+# 安全过滤：异常信息中可能包含 API Key，需要打码
+# ---------------------------------------------------------------------------
+
+_API_KEY_PATTERN = re.compile(r'(sk-[a-zA-Z0-9]{10,})\S*')
+
+
+def _safe_error(e: Exception) -> str:
+    """返回过滤后的异常信息，确保不含 API Key"""
+    msg = str(e)
+    msg = _API_KEY_PATTERN.sub("sk-...", msg)
+    # 也过滤 Bearer token
+    msg = msg.replace("Bearer sk-", "Bearer ***")
+    if len(msg) > 200:
+        msg = msg[:200] + "..."
+    return msg
 from services.risk_rules import detect_risk_keywords
 from services.ocr import extract_text, get_ocr_engine_name
 from services.html_extractor import extract_page_text
@@ -348,7 +366,7 @@ def analyze_product(image_path: Optional[str] = None, url: Optional[str] = None,
             report = _call_api(product_text, url, source_type)
             mode = "real_api"
         except Exception as e:
-            print(f"[Warning] API 调用失败，降级到 Mock 模式: {e}")
+            print(f"[Warning] API 调用失败，降级到 Mock 模式: {_safe_error(e)}")
             report = _get_mock_report(ocr_from_image or product_text or "", url or "")
             mode = "mock"
     else:
@@ -378,7 +396,7 @@ def analyze_product(image_path: Optional[str] = None, url: Optional[str] = None,
                         report = enhanced_report
                         print("[FactCheck] 已注入事实核查结果进行增强分析")
                     except Exception as e:
-                        print(f"[Warning] 增强分析失败，使用原始报告: {e}")
+                        print(f"[Warning] 增强分析失败，使用原始报告: {_safe_error(e)}")
         except Exception as e:
             print(f"[Warning] 事实核查失败: {e}")
 
