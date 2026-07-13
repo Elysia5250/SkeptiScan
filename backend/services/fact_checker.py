@@ -74,7 +74,7 @@ def _search_ddgs(query: str, max_results: int = 5) -> list[dict]:
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_run)
-            return future.result(timeout=10.0)
+            return future.result(timeout=5.0)
     except concurrent.futures.TimeoutError:
         print(f"[FactCheck] DuckDuckGo 超时")
         return []

@@ -229,7 +229,8 @@ def _print_status(idx, total, r):
     gt = r.get("ground_truth", "")
     mo = r["model_output"]
     if r.get("error"):
-        print(f"  [{idx}/{total}] {display}... ERROR ({lat:.1f}s)")
+        errmsg = r.get("error_msg", "")
+        print(f"  [{idx}/{total}] {display}... ERROR ({lat:.1f}s) {errmsg[:60]}")
     elif gt:
         m = "✓" if mo == gt else "✗"
         print(f"  [{idx}/{total}] {display}... {m} pred={mo} gt={gt} ({lat:.1f}s)")

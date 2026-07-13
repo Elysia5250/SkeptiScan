@@ -118,7 +118,7 @@ async def save_config(
     extra_prompt: str = Form(None, description="用户自定义额外提示词"),
 ):
     """
-    保存运行时 API 配置（不写入数据库，仅存内存）
+    保存运行时 API 配置（持久化到 .env，重启不丢失）
     """
     set_runtime_config(
         base_url=base_url,
@@ -126,6 +126,54 @@ async def save_config(
         model=model,
         extra_prompt=extra_prompt,
     )
+
+    # 持久化到 .env（确保重启后 Key 不丢失）
+    try:
+        env_path = Path(__file__).parent / ".env"
+        lines = []
+        keys_set = {"OPENAI_API_KEY": False, "OPENAI_API_BASE": False,
+                    "OPENAI_MODEL": False, "EXTRA_PROMPT": False}
+
+        if env_path.exists():
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("OPENAI_API_KEY="):
+                        if api_key:
+                            lines.append(f"OPENAI_API_KEY={api_key}\n")
+                            keys_set["OPENAI_API_KEY"] = True
+                        continue
+                    elif stripped.startswith("OPENAI_API_BASE="):
+                        if base_url:
+                            lines.append(f"OPENAI_API_BASE={base_url}\n")
+                            keys_set["OPENAI_API_BASE"] = True
+                        continue
+                    elif stripped.startswith("OPENAI_MODEL="):
+                        if model:
+                            lines.append(f"OPENAI_MODEL={model}\n")
+                            keys_set["OPENAI_MODEL"] = True
+                        continue
+                    elif stripped.startswith("EXTRA_PROMPT="):
+                        if extra_prompt is not None:
+                            lines.append(f"EXTRA_PROMPT={extra_prompt}\n")
+                            keys_set["EXTRA_PROMPT"] = True
+                        continue
+                    lines.append(line)
+
+        # 追加未设置的配置项
+        if api_key and not keys_set["OPENAI_API_KEY"]:
+            lines.append(f"OPENAI_API_KEY={api_key}\n")
+        if base_url and not keys_set["OPENAI_API_BASE"]:
+            lines.append(f"OPENAI_API_BASE={base_url}\n")
+        if model and not keys_set["OPENAI_MODEL"]:
+            lines.append(f"OPENAI_MODEL={model}\n")
+        if extra_prompt is not None and not keys_set["EXTRA_PROMPT"]:
+            lines.append(f"EXTRA_PROMPT={extra_prompt}\n")
+
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    except Exception as e:
+        print(f"[Warning] .env 写入失败: {e}")
 
     return {
         "success": True,
@@ -240,7 +288,7 @@ async def test_api_config():
 
 
 @app.post("/api/models/list")
-async def fetch_models():
+def fetch_models():
     """
     从已配置的 API 拉取可用模型列表
     调用 OpenAI Compatible 的 GET /v1/models 接口
@@ -263,7 +311,7 @@ async def fetch_models():
 
 
 @app.post("/api/analyze")
-async def analyze(
+def analyze(
     image: UploadFile = File(None, description="商品截图（可选）"),
     url: str = Form(None, description="商品链接（可选）"),
     text: str = Form(None, description="商品文案（直接输入文本，跳过URL/截图）"),
@@ -295,7 +343,7 @@ async def analyze(
             detail="请至少提供商品截图、商品链接或商品文案中的一种",
         )
 
-    # 保存上传的图片（限制大小 10MB，流式写入超时 30s）
+    # 保存上传的图片（限制大小 10MB）
     image_path = None
     if image:
         MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -306,14 +354,7 @@ async def analyze(
         total = 0
         with open(filepath, "wb") as f:
             while True:
-                try:
-                    chunk = await asyncio.wait_for(
-                        image.read(64 * 1024), timeout=30.0
-                    )
-                except asyncio.TimeoutError:
-                    filepath.unlink(missing_ok=True)
-                    raise HTTPException(status_code=400, detail="文件上传超时（超过 30 秒）")
-
+                chunk = image.file.read(64 * 1024)
                 if not chunk:
                     break
                 total += len(chunk)
@@ -324,26 +365,19 @@ async def analyze(
 
         image_path = str(filepath)
 
-    # 调用 AI 分析模块（在线程池中运行，避免阻塞事件循环）
-    # 外层整体超时 300s，防止某个环节永久挂起
-    ANALYZE_TIMEOUT = 300
-    try:
-        loop = asyncio.get_event_loop()
-        report, api_mode = await asyncio.wait_for(
-            loop.run_in_executor(None, analyze_product, image_path, url, mode, text),
-            timeout=ANALYZE_TIMEOUT,
-        )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="分析超时，请稍后重试或减少并发请求")
+    # 调用 AI 分析模块（同步调用，FastAPI 自动在默认线程池中执行）
+    report, api_mode = analyze_product(image_path, url, mode, text)
 
     # 将分析结果保存到数据库
     try:
         db = SessionLocal()
+        input_label = "image" if image else ("url" if url else "text")
+        input_val = (url or text or (image.filename if image else ""))[:100]
         record = AnalysisRecord(
-            input_type="image" if image else "url",
-            input_value=url or image.filename,
-            risk_level=report.get("risk_level", "未知"),
-            summary=report.get("summary", ""),
+            input_type=input_label,
+            input_value=input_val,
+            risk_level=str(report.get("risk_level", "")),
+            summary=report.get("summary", "")[:200],
             report_json=json.dumps(report, ensure_ascii=False),
         )
         db.add(record)

@@ -77,97 +77,28 @@ MOCK_REPORT = {
 # BASE_SYSTEM_PROMPT：后端写死的基础系统提示词
 # ---------------------------------------------------------------------------
 
-BASE_SYSTEM_PROMPT = """You are a "Consumer Risk Analysis Assistant" — evaluate product promotions and identify risk signals using a structured checklist.
+BASE_SYSTEM_PROMPT = """You are a "Consumer Risk Analysis Assistant". Evaluate product promotions and identify risk signals.
 
-For each product description, fill in the **checklist** below. The backend will compute the final risk level from your scores.
+For each product, output your analysis as JSON with these fields:
+- summary: brief product summary in Chinese
+- risk_level: integer 1-10 (1-3=safe, 4-6=suspicious, 7-10=scam)
+- suspicious_claims: list of suspicious claims found
+- marketing_tricks: list of marketing tactics used
+- fact_check_suggestions: list of verification suggestions
+- purchase_advice: purchase recommendation in Chinese
+- elderly_friendly_warning: one-sentence warning for elderly in Chinese
+- detailed_analysis: full Markdown analysis in Chinese explaining reasoning
 
-## Checklist Dimensions
+Use these risk signals (adjust risk_level accordingly):
+1. Pseudoscience: quantum, magnetic, negative ions, detox, meridian, energy fields, nano-therapy
+2. False medical claims: promises to cure/treat diseases, "不用吃药", efficacy data without methodology
+3. Fake authority: unverifiable "院士"/"CCTV" endorsements, patents without numbers
+4. MLM/illegal: referral commissions (直推/间推/返利), guaranteed returns, recruitment fees
+5. Deceptive marketing: urgency/scarcity, bait-and-switch pricing, hidden fees
+6. Data fraud: citing non-applicable research, lab data as human evidence
+7. Trusted signals (lower risk): verifiable 国药准字/国械注准, well-known brands, no health claims
 
-### 1. Pseudoscience Packaging (伪科学包装) — max 25 points
-| Item | Points | Description |
-|------|--------|-------------|
-| Quantum/magnetic/negative ion used as therapy claim | +5 | "量子共振治疗""磁疗疏通经络""负离子治疗疾病" |
-| Detox / meridian / microcirculation pseudo-claims | +5 | "排毒""疏通经络""改善微循环" as health claims |
-| Structured water / energy field / cell activation | +5 | "小分子团水""能量场""活化细胞" |
-| Vague "bio-" / "nano-" / "far-infrared" in therapeutic context | +5 | "纳米技术直达骨骼""远红外穿透治疗" without medical device certification |
-| Other pseudoscience terms not covered above | +5 | Any other term with no scientific basis in the claimed context |
-
-### 2. False Medical Claims (虚假医疗声称) — max 25 points
-| Item | Points | Description |
-|------|--------|-------------|
-| Explicit disease treatment claim | +10 | Claims to "cure""treat""根治" specific diseases (cancer, diabetes, hypertension) |
-| Implicit medical substitution | +5 | "不用吃药""告别药物""替代化疗" |
-| Efficacy data without methodology | +5 | "有效率96.5%""93.7%使用者改善" without sample size, control group, or verifiable institution |
-| Health anxiety exploitation | +5 | "错过治疗机会""不买后悔""90%的早期患者因未及时发现..." |
-
-### 3. Fake Authority Endorsements (虚假权威背书) — max 15 points
-| Item | Points | Description |
-|------|--------|-------------|
-| Unverifiable "academician"/"expert team" endorsement | +5 | "院士团队研发""中科院专家" without verifiable names or affiliations |
-| Unverifiable "CCTV"/"state media" recommendation | +5 | "央视推荐""CCTV上榜品牌" without verifiable evidence |
-| Fake or unverifiable certification/patent | +5 | "国家专利" without patent number, "国际认证" without certifying body, "FDA注册" without registration number |
-
-### 4. Illegal / MLM Patterns (违法/传销特征) — max 20 points
-| Item | Points | Description |
-|------|--------|-------------|
-| Multi-level commission / referral recruitment | +8 | "直推奖励20%""间推奖""三代返利""拉人头" |
-| Guaranteed returns / "no risk" investment claims | +5 | "稳赚不赔""保本保息""日收益1%" |
-| Membership-based recruitment with upfront payment | +4 | "购买XX元成为VIP会员""加盟费""发展下线" |
-| Unlicensed financial activity | +3 | "消费返利""内部名额""限时入场" without financial license |
-
-### 5. Deceptive / Bait Marketing (诱导欺诈营销) — max 10 points
-| Item | Points | Description |
-|------|--------|-------------|
-| Urgency / scarcity pressure | +3 | "限时优惠""最后一天""限量100套""仅剩27份" |
-| Bait-and-switch (free → paid) | +3 | "免费领" with hidden consumable costs, "99元体验营" leading to "19800元套餐" |
-| "Money-back guarantee" without substance | +2 | "无效退款" with conditions that make refund nearly impossible |
-| Hidden terms / "only XX age" targeting | +2 | "仅限60岁以上人士报名" targeting vulnerable groups |
-
-### 6. Data Fraud (数据欺诈) — max 10 points
-| Item | Points | Description |
-|------|--------|-------------|
-| Citing non-applicable research as own evidence | +5 | "引用XX论文" where the paper does NOT test this product |
-| Lab/animal data presented as human efficacy | +5 | "体外实验表明""动物实验显示" implied as human benefits |
-
-### 7. Trusted Signals (可信信号) — negative points (max -10)
-| Item | Points | Description |
-|------|--------|-------------|
-| Verifiable drug/medical device registration number | -5 | "国药准字""国械注准" with credible product claims matching its approved use |
-| Well-known brand with normal marketing language | -3 | Brand-name product with standard promotional language, no false claims |
-| No efficacy or health claims at all | -2 | Pure informational/product description, no therapeutic implications |
-
-## Output Requirements
-
-1. **Output valid JSON only.** No markdown wrapping (except detailed_analysis).
-2. For each **triggered** checklist item, include it in `triggered_items` with format `"item description (+N): evidence from text"`.
-3. Un-triggered items should NOT be included in `triggered_items`.
-4. `score_breakdown` sums your assigned points per dimension. The backend will compute the final risk level.
-5. `detailed_analysis` is a Markdown section explaining your reasoning.
-
-JSON schema:
-{
-  "summary": "Brief product summary in Chinese (1-2 sentences).",
-  "score_breakdown": {
-    "pseudoscience": 0-25,
-    "false_medical": 0-25,
-    "fake_authority": 0-15,
-    "illegal_mlm": 0-20,
-    "deceptive_marketing": 0-10,
-    "data_fraud": 0-10,
-    "trusted_signals": -10-0
-  },
-  "triggered_items": [
-    "量子/magnetic/negative ion used as therapy claim (+5): product claims 量子共振治疗...",
-    "Explicit disease treatment claim (+10): 声称三个月远离高血压糖尿病",
-    "Well-known brand with normal marketing language (-3): 知名品牌NIKE，正常促销语言"
-  ],
-  "suspicious_claims": ["Specific suspicious claim 1", "Claim 2"],
-  "marketing_tricks": ["Tactic 1", "Tactic 2"],
-  "fact_check_suggestions": ["Suggestion 1", "Suggestion 2"],
-  "purchase_advice": "Purchase advice in Chinese",
-  "elderly_friendly_warning": "One-sentence warning in Chinese",
-  "detailed_analysis": "Full Markdown analysis explaining reasoning."
-}"""
+Output valid JSON only. No markdown wrapping."""
 
 
 # ---------------------------------------------------------------------------
@@ -338,26 +269,15 @@ def _call_api(
         else:
             raise ValueError(f"AI 输出格式错误: {content[:200]}")
 
-    # 计算 risk_level（新格式优先）
-    if "score_breakdown" in result:
-        result["risk_level"] = _compute_risk_level(result["score_breakdown"])
-    elif "risk_level" not in result:
-        result["risk_level"] = 5
+    # 确保 score_breakdown 存在（从 KB 估算或 risk_level 换算）
+    if "score_breakdown" not in result:
         result["score_breakdown"] = {"pseudoscience": 0, "false_medical": 0, "fake_authority": 0,
                                      "illegal_mlm": 0, "deceptive_marketing": 0, "data_fraud": 0,
                                      "trusted_signals": 0}
+    if "triggered_items" not in result:
         result["triggered_items"] = []
-    else:
-        level = result["risk_level"]
-        if isinstance(level, int) and 1 <= level <= 10:
-            base = max(0, (level - 1) * 10)
-        else:
-            base = 30
-        result["score_breakdown"] = {"pseudoscience": base // 3, "false_medical": base // 3,
-                                     "fake_authority": base // 6, "illegal_mlm": 0,
-                                     "deceptive_marketing": base // 6, "data_fraud": 0,
-                                     "trusted_signals": 0}
-        result["triggered_items"] = result.get("triggered_items", [])
+    if "risk_level" not in result or not isinstance(result.get("risk_level"), int):
+        result["risk_level"] = 5
 
     return result
 
@@ -463,30 +383,31 @@ def analyze_product(image_path: Optional[str] = None, url: Optional[str] = None,
     if product_text:
         report["extracted_text"] = product_text[:2000]
 
-    # ---- Step 4: 联网事实核查（仅 external 模式启用增强） ----
-    suspicious_claims = report.get("suspicious_claims", [])
-    if suspicious_claims and is_search_available():
-        try:
-            fact_results = search_claims(suspicious_claims)
-            if fact_results:
-                report["fact_check_results"] = fact_results
+    # ---- Step 4: 联网事实核查（仅 external 模式启用） ----
+    if output_mode == "external":
+        suspicious_claims = report.get("suspicious_claims", [])
+        if suspicious_claims and is_search_available():
+            try:
+                fact_results = search_claims(suspicious_claims)
+                if fact_results:
+                    report["fact_check_results"] = fact_results
 
-                # external 模式：事实核查结果 + KB 结果注入第二轮增强分析
-                if output_mode == "external" and mode == "real_api" and has_api_key():
-                    try:
-                        fact_context = build_fact_check_prompt(fact_results)
-                        enhanced_report = _call_api(product_text, url, source_type,
-                                                    fact_check_context=fact_context,
-                                                    kb_context=kb_context)
-                        if product_text:
-                            enhanced_report["extracted_text"] = product_text[:2000]
-                        enhanced_report["fact_check_results"] = fact_results
-                        report = enhanced_report
-                        print("[FactCheck] 已注入事实核查+KB结果进行增强分析")
-                    except Exception as e:
-                        print(f"[Warning] 增强分析失败，使用原始报告: {_safe_error(e)}")
-        except Exception as e:
-            print(f"[Warning] 事实核查失败: {e}")
+                    # 事实核查结果 + KB 结果注入第二轮增强分析
+                    if mode == "real_api" and has_api_key():
+                        try:
+                            fact_context = build_fact_check_prompt(fact_results)
+                            enhanced_report = _call_api(product_text, url, source_type,
+                                                        fact_check_context=fact_context,
+                                                        kb_context=kb_context)
+                            if product_text:
+                                enhanced_report["extracted_text"] = product_text[:2000]
+                            enhanced_report["fact_check_results"] = fact_results
+                            report = enhanced_report
+                            print("[FactCheck] 已注入事实核查+KB结果进行增强分析")
+                        except Exception as e:
+                            print(f"[Warning] 增强分析失败，使用原始报告: {_safe_error(e)}")
+            except Exception as e:
+                print(f"[Warning] 事实核查失败: {e}")
 
     # ---- Step 5: 关键词检测（始终运行） ----
 
