@@ -1,20 +1,32 @@
 # FastAPI + 服务器
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.6
+fastapi
+uvicorn
+python-multipart
 
 # 数据库
-sqlalchemy==2.0.23
+sqlalchemy
 
 # 环境变量
-python-dotenv==1.0.0
+python-dotenv
 
 # HTTP 请求 / OpenAI SDK
-httpx==0.25.2
-openai==1.6.1
+httpx
+openai
 
 # 图片处理
-Pillow==10.1.0
+Pillow
 
-# 可选：Playwright 截图（后续扩展用）
-# playwright==1.40.0
+# HTML 解析（页面正文提取）
+lxml
+
+# Playwright 网页截图
+# 安装浏览器: playwright install chromium
+playwright
+
+# OCR 文字提取
+# 使用 PyTesseract（轻量，需安装 tesseract-ocr 系统包）
+#   macOS: brew install tesseract tesseract-lang
+#   Ubuntu: apt install tesseract-ocr tesseract-ocr-chi-sim
+# 也可换 PaddleOCR（中文更准，但更重）
+#   pip install paddlepaddle paddleocr
+pytesseract

@@ -53,8 +53,8 @@ def get_ai_config() -> dict:
     """
     # 默认值
     defaults = {
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o-mini",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-v4-flash",
     }
 
     # 环境变量

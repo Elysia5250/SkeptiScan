@@ -1,6 +1,6 @@
-# 🛡️ 反噶韭菜商品风险分析工具
+# 🛡️ 反噶韭菜商品风险分析工具 v2.0I
 
-上传商品截图或输入商品链接，系统自动识别可疑营销话术，并调用大模型 API 生成一份商品风险分析报告。帮你和家中的长辈识别消费陷阱，远离智商税。
+上传商品截图、输入商品链接或直接粘贴商品文案，系统自动提取文字、识别可疑营销话术，并通过联网事实核查交叉验证，生成一份结构化风险分析报告。帮你和家中的长辈识别消费陷阱，远离智商税。
 
 ## 技术栈
 
@@ -9,8 +9,10 @@
 | 前端 | Vue 3 + Vite + Axios |
 | 后端 | Python FastAPI |
 | 数据库 | SQLite (via SQLAlchemy) |
-| AI 模型 | OpenAI Compatible API（GPT-4o-mini / DeepSeek / Qwen 等） |
-| 截图 (预留) | Playwright |
+| AI 模型 | OpenAI Compatible API（DeepSeek / GPT / Qwen 等） |
+| 截图引擎 | Playwright（降级备用） |
+| 文字提取 | OCR (Tesseract) + HTML 正文抽取 (lxml) |
+| 事实核查 | DuckDuckGo / Bing / Wikipedia 多后端搜索 |
 
 ## 项目结构
 
@@ -18,13 +20,16 @@
 anti-leek-checker/
 ├── backend/
 │   ├── main.py                  # FastAPI 应用入口 & API 路由
-│   ├── config.py                # 环境变量 + 运行时动态配置（UI > 环境变量 > 默认值）
+│   ├── config.py                # 环境变量 + 运行时动态配置
 │   ├── database.py              # 数据库连接 & 会话管理
 │   ├── models.py                # SQLAlchemy 数据模型
 │   ├── services/
-│   │   ├── ai_analyzer.py       # AI 分析模块（三层提示词结构 + OpenAI SDK）
-│   │   ├── risk_rules.py        # 关键词规则检测
-│   │   └── screenshot.py        # 网页截图（预留）
+│   │   ├── ai_analyzer.py       # AI 分析模块（10 级风险评分 + Markdown 解释）
+│   │   ├── html_extractor.py    # 网页正文快速提取（httpx + lxml）
+│   │   ├── screenshot.py        # Playwright 截图（降级备用）
+│   │   ├── ocr.py               # OCR 图片文字提取（Tesseract）
+│   │   ├── fact_checker.py      # 联网事实核查（多搜索引擎）
+│   │   └── risk_rules.py        # 关键词规则检测
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/
@@ -33,186 +38,148 @@ anti-leek-checker/
 │   ├── vite.config.js
 │   └── src/
 │       ├── main.js              # Vue 应用入口
-│       ├── App.vue              # 主页面组件（含配置面板 + 报告展示）
+│       ├── App.vue              # 主页面组件（配置面板 + 报告 + 模型列表获取）
 │       ├── api.js               # 后端 API 封装
 │       └── style.css            # 全局样式
+├── tests/
+│   ├── run_benchmark.py         # 基准测试入口（多 worker 并发）
+│   ├── generate_dataset.py      # 测试数据集生成
+│   ├── scrape_sources.py        # 搜索真实商品链接
+│   ├── reporter.py              # ECharts HTML 报告生成
+│   ├── archive/                 # 三轮基准测试归档
+│   │   ├── v1/                  # 20 条简单用例 (100%)
+│   │   ├── v2/                  # 100 条中等难度 (95%)
+│   │   └── v3/                  # 100 条最难 (70%→78%)
+│   └── dataset_100.csv          # 当前工作数据集
 └── README.md
 ```
 
 ## 快速开始
 
-### 1. 克隆项目
+### 1. 启动后端
 
 ```bash
-git clone <repo-url>
-cd anti-leek-checker
-```
-
-### 2. 启动后端
-
-```bash
-# 进入后端目录
 cd backend
-
-# 推荐创建虚拟环境
 python -m venv venv
-source venv/bin/activate  # macOS/Linux
-# 或 venv\Scripts\activate  # Windows
-
-# 安装依赖
+source venv/bin/activate
 pip install -r requirements.txt
-
-# 复制环境变量文件
+playwright install chromium      # 截图引擎
+brew install tesseract tesseract-lang  # macOS OCR 引擎
 cp .env.example .env
-
-# 启动服务（默认 http://localhost:8000）
-uvicorn main:app --reload
+uvicorn main:app --reload        # http://localhost:8000
 ```
 
-> **提示**：如果不配置 `OPENAI_API_KEY`，系统会自动使用 Mock 模式返回模拟报告，无需真实 API Key 即可演示完整功能。
-
-### 3. 启动前端
-
-**新开一个终端窗口**，进入前端目录：
+### 2. 启动前端
 
 ```bash
-# 进入前端目录
 cd frontend
-
-# 安装依赖
 npm install
-
-# 启动开发服务器（默认 http://localhost:5173）
-npm run dev
+npm run dev                      # http://localhost:5173
 ```
-
-### 4. 访问页面
-
-浏览器打开 http://localhost:5173
 
 ## 环境变量说明
 
-在 `backend/.env` 文件中配置。**优先级：UI 运行时配置 > 环境变量 > 默认值**。
+优先级：**UI 运行时配置 > 环境变量 > 默认值**。
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `OPENAI_API_KEY` | OpenAI Compatible API Key | 空（Mock 模式） |
-| `OPENAI_API_BASE` | API 地址 | https://api.openai.com/v1 |
-| `OPENAI_MODEL` | 使用的模型 | gpt-4o-mini |
+| `OPENAI_API_BASE` | API 地址 | `https://api.deepseek.com` |
+| `OPENAI_MODEL` | 使用的模型 | `deepseek-v4-flash` |
 | `EXTRA_PROMPT` | 自定义额外提示词 | 空 |
 
-## API 配置方式
+## 配置方式
 
-### 方式一：前端 UI 配置
+### 前端 UI
 
-1. 展开首页顶部的 **⚙️ 模型配置** 面板
-2. 填写 API Base URL、API Key（密码框隐藏）、Model、Extra Prompt
-3. 点击 **💾 保存配置**
-4. 配置状态会显示为"已配置 API"或"Mock 演示模式"
+展开 **⚙️ 模型配置** 面板，填写 Base URL、API Key、Model，点"保存配置"。还可以点"获取模型列表"自动拉取可用模型。
 
-### 方式二：环境变量
+### 环境变量
 
-在 `backend/.env` 中填写：
-```
+```bash
 OPENAI_API_KEY=sk-xxx
-OPENAI_API_BASE=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o-mini
-EXTRA_PROMPT=请重点关注保健品骗局
+OPENAI_API_BASE=https://api.deepseek.com
+OPENAI_MODEL=deepseek-v4-flash
 ```
-
-## 提示词注入位置
-
-提示词分为三层，全部在后端 `backend/services/ai_analyzer.py` 中拼接，**前端不参与提示词构建**：
-
-```
-messages = [
-  {
-    "role": "system",
-    "content": BASE_SYSTEM_PROMPT       # 后端写死的基础系统提示词
-  },
-  {
-    "role": "system",
-    "content": "以下是用户补充的分析要求...\n" + extra_prompt  # 用户 Extra Prompt（有值时才添加）
-  },
-  {
-    "role": "user",
-    "content": USER_PROMPT               # 根据图片/URL动态生成的任务提示词
-  }
-]
-```
-
-- **BASE_SYSTEM_PROMPT**：内置风险分析规则（夸大疗效、伪科学包装、虚假背书、健康焦虑、投资返利、诱导销售六大类）
-- **EXTRA_PROMPT**：用户在 UI 中配置的额外提示词，以独立 system message 注入
-- **USER_PROMPT**：根据是否有图片、URL 动态生成
 
 ## API 接口
 
-### `GET /`
-返回项目状态信息。
-
-### `POST /api/config`
-保存运行时 API 配置（不写入数据库，仅存内存）。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `base_url` | string | 否 | OpenAI Compatible Base URL |
-| `api_key` | string | 否 | API Key |
-| `model` | string | 否 | 模型名称 |
-| `extra_prompt` | string | 否 | 自定义额外提示词 |
-
-### `GET /api/config/status`
-返回当前配置状态（不返回 API Key）。
-
-```json
-{
-  "api_configured": false,
-  "base_url": "https://api.openai.com/v1",
-  "model": "gpt-4o-mini",
-  "extra_prompt_configured": false,
-  "mode": "mock"
-}
-```
-
-### `POST /api/config/test`
-一键测试当前 API 配置是否可用。使用最小请求（`"请只回复 OK"`）验证连通性，不调用商品分析逻辑。
-
-| 场景 | 返回 |
-|------|------|
-| 未配置 API Key | `{"success": false, "message": "未配置 API Key", "mode": "mock"}` |
-| API 调用失败 | `{"success": false, "message": "认证失败/连接超时/模型不存在...", "mode": "error"}` |
-| 调用成功 | `{"success": true, "message": "API 配置可用", "mode": "real_api", "model": "xxx"}` |
-
 ### `POST /api/analyze`
-支持 `multipart/form-data`：
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `image` | File | 否 | 商品截图 |
-| `url` | string | 否 | 商品链接 |
+| `image` | File | 否 | 商品截图（OCR 提取文字，不传图给 LLM） |
+| `url` | string | 否 | 商品链接（HTML 提取 → 截图降级 → OCR） |
+| `text` | string | 否 | 直接输入商品文案（跳过提取步骤） |
+| `mode` | string | 否 | `external`（前端完整报告）/ `benchmark`（测试精简模式） |
 
-返回格式：
+返回 `risk_level` 为整数 1-10，附带 `detailed_analysis` 字段（Markdown 格式推理过程）。详细 JSON schema 见后端代码。
 
-```json
-{
-  "success": true,
-  "mode": "real_api",
-  "report": {
-    "summary": "...",
-    "risk_level": "高",
-    "suspicious_claims": ["..."],
-    "marketing_tricks": ["..."],
-    "fact_check_suggestions": ["..."],
-    "purchase_advice": "...",
-    "elderly_friendly_warning": "..."
-  }
-}
+### `POST /api/models/list`
+
+从已配置的 API 拉取可用模型列表（调用 OpenAI Compatible `/v1/models`）。
+
+其他接口（`GET /`、`/api/config`、`/api/config/status`、`/api/config/test`）与 v1.1 保持一致。
+
+## 核心流程
+
+```
+input (url/image/text)
+    ↓
+文字提取
+  ├── url → HTML 直接提取（httpx, ~1s）
+  │         失败 → Playwright 截图 + OCR（~8s, 降级）
+  ├── image → OCR（Tesseract, 带超时 30s）
+  └── text → 直接使用
+    ↓
+关键词规则检测（risk_rules.py）
+    ↓
+AI 分析（纯文本，不传图片，节省 token）
+    ↓
+联网事实核查（Bing → DuckDuckGo → Wikipedia，多后端）
+    ↓
+external 模式：事实核查结果注入第二轮增强分析
+    ↓
+返回 1-10 级风险评分 + Markdown 解释
 ```
 
-`mode` 字段表示分析来源：
-- `"real_api"`：来自真实 API 调用
-- `"mock"`：来自 Mock 演示模式
+## 基准测试结果
 
-## 当前功能（v1.1）
+三轮递增难度测试，使用 DeepSeek V4 Flash 模型，以 6 为阈值（≥6 = scam）：
+
+| 版本 | 用例 | 说明 | 准确率 |
+|------|------|------|--------|
+| v1 | 20 条简单 | 纯骗局 vs 纯正品 | **100%** |
+| v2 | 100 条中等 | 混入合规信息/注册号 | **95%** |
+| v3 | 100 条最难 | 偷换概念/让步/钓鱼/混淆样本 | **78%** |
+
+v3 测试涵盖：经典骗局案例加工、偷换概念型广告（引用不相关研究）、让步免责型（"不替代药品但…"）、钓鱼后续收费型、听起来像骗局的真实产品。改进提示词后准确率从 70% 提升至 78%。
+
+详细报告和解释文件见 `tests/archive/`。
+
+## 版本日志
+
+### v2.0I (2026-07-13)
+
+- [x] **10 级风险评分制**：1-10 分制替代原来的"低/中/高"三级
+- [x] **Markdown 详细解释**：每条分析附带 `detailed_analysis` 字段，展示完整推理过程
+- [x] **HTML 直接提取正文**：URL 输入优先通过 httpx + lxml 提取页面文字（~1s），替代截图
+- [x] **多模式输出**：`external`（前端完整报告）/ `benchmark`（测试精简模式）
+- [x] **多 worker 并发基准测试**：`run_benchmark.py --workers N`，支持并发跑分
+- [x] **联网事实核查增强**：Bing + DuckDuckGo + Wikipedia 多后端搜索，自动生成核查摘要
+- [x] **自动拉取模型列表**：前端"获取模型列表"按钮，通过 `/v1/models` 接口自动获取
+- [x] **图片不传 LLM**：OCR 提取文字后仅传文本，节省图片 token 费用
+- [x] **纯文本输入**：`/api/analyze` 新增 `text` 参数，可直接传文案分析
+- [x] **数据集生成器**：`generate_dataset.py` 基于种子模板 + LLM 生成变体，支持难样本
+- [x] **测试结果归档**：`tests/archive/v1-v3`，每轮含 CSV + HTML 报告 + 解释文件
+- [x] **DeepSeek V4 Flash 默认模型**：默认对接 DeepSeek，降低推理成本
+- [x] **系统提示词增强**：新增偷换概念、让步免责、钓鱼收费、数据引用欺诈 4 类风险信号
+- [x] 思考模式自动禁用（DeepSeek 兼容性）
+- [x] 安全加固：文件上传大小限制（10MB）、OCR 超时（30s）、图片尺寸校验、SSL 验证
+
+<details>
+<summary><b>v1.1 (previous version)</b></summary>
+<br>
 
 - [x] 首页包含文件上传和 URL 输入两种方式
 - [x] 上传商品截图或输入链接进行分析
@@ -232,15 +199,7 @@ messages = [
 - [x] 响应式设计，移动端友好
 - [x] 保存配置与测试 API 分离设计
 
-## 后续可扩展方向
-
-- [ ] **Playwright 自动截图**：输入 URL 后自动截取商品页面，提高分析准确性
-- [ ] **OCR 识别**：从图片中提取文字，增强关键词检测能力
-- [ ] **联网事实核查**：自动搜索权威来源进行交叉验证
-- [ ] **价格比对**：对比同类商品市场价格，识别虚高定价
-- [ ] **黑名单商家库**：积累不良商家信息，查询历史记录
-- [ ] **面向中老年人的简洁模式**：大字体、语音播报、一键分享给子女
-- [ ] **微信小程序端**：降低使用门槛，方便中老年人使用
+</details>
 
 ## License
 

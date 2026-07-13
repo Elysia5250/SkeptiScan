@@ -7,6 +7,7 @@
     uvicorn main:app --reload
 """
 
+import asyncio
 import json
 import shutil
 from datetime import datetime
@@ -20,7 +21,6 @@ from database import init_db, SessionLocal
 from models import AnalysisRecord
 from config import set_runtime_config, get_ai_config, has_api_key
 from services.ai_analyzer import analyze_product
-from services.screenshot import capture_url_screenshot
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="反噶韭菜商品风险分析工具",
     description="上传商品截图或输入商品链接，系统自动识别可疑营销话术并生成风险分析报告",
-    version="1.2.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -65,7 +65,7 @@ async def root():
     """健康检查接口，返回项目状态"""
     return {
         "name": "反噶韭菜商品风险分析工具",
-        "version": "1.2.0",
+        "version": "2.0.0",
         "status": "running",
         "timestamp": datetime.now().isoformat(),
     }
@@ -142,15 +142,25 @@ async def test_api_config():
             timeout=30.0,
         )
 
-        response = client.chat.completions.create(
+        request_kwargs = dict(
             model=model,
             messages=[{"role": "user", "content": "请只回复 OK"}],
             temperature=0,
-            max_tokens=10,
+            max_tokens=50,
         )
+        # 禁用思考模式（DeepSeek 等模型默认开启）
+        try:
+            request_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        except Exception:
+            pass
 
-        # 检查是否正常返回
-        reply = response.choices[0].message.content.strip()
+        response = client.chat.completions.create(**request_kwargs)
+
+        msg = response.choices[0].message
+        reply = (msg.content or "").strip()
+        if not reply and hasattr(msg, "reasoning_content"):
+            reply = (msg.reasoning_content or "").strip()
+
         if reply:
             return {
                 "success": True,
@@ -196,13 +206,47 @@ async def test_api_config():
         }
 
 
+@app.post("/api/models/list")
+async def fetch_models():
+    """
+    从已配置的 API 拉取可用模型列表
+    调用 OpenAI Compatible 的 GET /v1/models 接口
+    """
+    config = get_ai_config()
+    api_key = config["api_key"]
+    base_url = config["base_url"]
+
+    if not api_key.strip():
+        return {"success": False, "models": [], "message": "请先配置 API Key"}
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=15.0)
+        response = client.models.list()
+        models = sorted([m.id for m in response.data])
+        return {"success": True, "models": models}
+    except Exception as e:
+        return {"success": False, "models": [], "message": str(e)[:100]}
+
+
 @app.post("/api/analyze")
 async def analyze(
     image: UploadFile = File(None, description="商品截图（可选）"),
     url: str = Form(None, description="商品链接（可选）"),
+    text: str = Form(None, description="商品文案（直接输入文本，跳过URL/截图）"),
+    mode: str = Form("external", description="external=完整报告（前端）, benchmark=精简模式（测试脚本）"),
 ):
     """
     商品风险分析接口
+
+    三种输入方式（任选其一）：
+    - url: 提供商品链接，系统自动提取正文
+    - image: 上传商品截图，OCR提取文字
+    - text: 直接输入商品文案，跳过提取步骤
+
+    两种模式：
+    - external（默认）：完整分析 + 事实核查增强，返回前端友好报告
+    - benchmark：精简分析，跳过事实核查增强，返回结构化结果供测试比对
 
     返回格式：
     {
@@ -212,32 +256,52 @@ async def analyze(
     }
     """
     # 校验：至少需要提供一种输入
-    if not image and not url:
+    if not image and not url and not text:
         raise HTTPException(
             status_code=400,
-            detail="请至少提供商品截图或商品链接中的一种",
+            detail="请至少提供商品截图、商品链接或商品文案中的一种",
         )
 
-    # 保存上传的图片
+    # 保存上传的图片（限制大小 10MB，流式写入超时 30s）
     image_path = None
     if image:
+        MAX_FILE_BYTES = 10 * 1024 * 1024
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{timestamp}_{image.filename}"
         filepath = UPLOAD_DIR / filename
 
+        total = 0
         with open(filepath, "wb") as f:
-            shutil.copyfileobj(image.file, f)
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        image.read(64 * 1024), timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    filepath.unlink(missing_ok=True)
+                    raise HTTPException(status_code=400, detail="文件上传超时（超过 30 秒）")
+
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_FILE_BYTES:
+                    filepath.unlink(missing_ok=True)
+                    raise HTTPException(status_code=400, detail="文件大小超过 10MB 限制")
+                f.write(chunk)
 
         image_path = str(filepath)
 
-    # 如果提供了 URL，先尝试截图（MVP 阶段截图返回 None）
-    if url:
-        screenshot_path = capture_url_screenshot(url)
-        if screenshot_path and not image_path:
-            image_path = screenshot_path
-
-    # 调用 AI 分析模块，获取报告和模式标识
-    report, mode = analyze_product(image_path=image_path, url=url)
+    # 调用 AI 分析模块（在线程池中运行，避免阻塞事件循环）
+    # 外层整体超时 300s，防止某个环节永久挂起
+    ANALYZE_TIMEOUT = 300
+    try:
+        loop = asyncio.get_event_loop()
+        report, api_mode = await asyncio.wait_for(
+            loop.run_in_executor(None, analyze_product, image_path, url, mode, text),
+            timeout=ANALYZE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="分析超时，请稍后重试或减少并发请求")
 
     # 将分析结果保存到数据库
     try:
@@ -257,7 +321,7 @@ async def analyze(
 
     return {
         "success": True,
-        "mode": mode,
+        "mode": api_mode,
         "report": report,
     }
 

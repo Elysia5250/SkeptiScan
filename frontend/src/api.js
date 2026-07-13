@@ -30,6 +30,7 @@ export async function analyzeProduct(image = null, url = null) {
   if (url) {
     formData.append('url', url)
   }
+  formData.append('mode', 'external')
 
   const response = await axios.post('/api/analyze', formData, {
     baseURL: '',
@@ -87,6 +88,15 @@ export async function testApiConfig() {
  */
 export async function getStatus() {
   const response = await api.get('/')
+  return response.data
+}
+
+/**
+ * 获取可用模型列表（通过已配置的 API）
+ * @returns {Promise<{success: boolean, models: string[], message: string}>}
+ */
+export async function fetchModels() {
+  const response = await api.post('/api/models/list')
   return response.data
 }
 

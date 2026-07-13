@@ -57,7 +57,7 @@
               v-model="configForm.base_url"
               type="url"
               class="form-input"
-              placeholder="https://api.openai.com/v1"
+              placeholder="https://api.deepseek.com"
             />
           </div>
 
@@ -87,13 +87,43 @@
           <!-- Model -->
           <div class="form-group">
             <label class="form-label">Model</label>
-            <input
-              v-model="configForm.model"
-              type="text"
-              class="form-input"
-              placeholder="gpt-4o-mini"
-            />
-            <p class="form-hint">支持 gpt-4o-mini、deepseek-chat、qwen-plus 等</p>
+            <div class="model-input-row">
+              <div class="model-select-wrapper">
+                <input
+                  v-if="!modelList.length"
+                  v-model="configForm.model"
+                  type="text"
+                  class="form-input"
+                  placeholder="deepseek-v4-flash"
+                />
+                <select
+                  v-else
+                  v-model="configForm.model"
+                  class="form-input model-select"
+                >
+                  <option v-for="m in modelList" :key="m" :value="m">{{ m }}</option>
+                </select>
+              </div>
+              <button
+                class="btn btn-outline"
+                :disabled="fetchingModels || !configForm.api_key"
+                @click="handleFetchModels"
+                type="button"
+                title="从 API 拉取模型列表"
+              >
+                <span v-if="fetchingModels" class="spinner spinner--sm"></span>
+                <template v-else>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                </template>
+                <span>{{ fetchingModels ? '获取中...' : '获取模型列表' }}</span>
+              </button>
+            </div>
+            <p v-if="modelFetchError" class="form-hint form-hint--error">{{ modelFetchError }}</p>
+            <p v-else-if="modelList.length" class="form-hint form-hint--success">已获取 {{ modelList.length }} 个模型</p>
+            <p v-else class="form-hint">点击"获取模型列表"自动拉取，或手动输入模型名</p>
           </div>
 
           <!-- Extra Prompt -->
@@ -421,6 +451,38 @@
           </ul>
         </div>
 
+        <!-- 联网事实核查结果 -->
+        <div v-if="report.fact_check_results && report.fact_check_results.length" class="card report-card">
+          <h3 class="report-card-title">
+            <span class="report-card-icon report-card-icon--info">🌐</span>
+            联网事实核查
+          </h3>
+          <div
+            v-for="(fc, index) in report.fact_check_results"
+            :key="index"
+            class="fact-check-item"
+          >
+            <div class="fact-check-claim">
+              <span class="fact-check-label">可疑声称</span>
+              <span>{{ fc.claim }}</span>
+            </div>
+            <div class="fact-check-summary">{{ fc.summary }}</div>
+            <div v-if="fc.results && fc.results.length" class="fact-check-sources">
+              <span class="fact-check-sources-label">相关来源</span>
+              <a
+                v-for="(src, si) in fc.results.slice(0, 3)"
+                :key="si"
+                :href="src.href"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="fact-check-link"
+              >
+                {{ src.title || src.href }}
+              </a>
+            </div>
+          </div>
+        </div>
+
         <!-- 购买建议 -->
         <div class="card report-card">
           <h3 class="report-card-title">
@@ -443,6 +505,46 @@
               {{ report.elderly_friendly_warning }}
             </p>
           </div>
+        </div>
+
+        <!-- 风险关键词检测 -->
+        <div v-if="report.detected_keywords" class="card report-card">
+          <h3 class="report-card-title">
+            <span class="report-card-icon report-card-icon--warning">⚠️</span>
+            自动检测到的风险关键词
+          </h3>
+          <div class="keyword-tags">
+            <span
+              v-for="(kw, idx) in report.detected_keywords.all_matched"
+              :key="idx"
+              class="keyword-tag"
+              :class="{
+                'keyword-tag--high': report.detected_keywords.high_risk_keywords.includes(kw),
+                'keyword-tag--medium': report.detected_keywords.medium_risk_keywords.includes(kw),
+              }"
+            >{{ kw }}</span>
+            <p v-if="!report.detected_keywords.all_matched.length" class="keyword-empty">未匹配到风险关键词</p>
+          </div>
+        </div>
+
+        <!-- OCR 提取文字（可折叠） -->
+        <div v-if="report.ocr_text" class="card report-card">
+          <button class="ocr-toggle" @click="ocrExpanded = !ocrExpanded">
+            <span class="report-card-title" style="margin-bottom: 0;">
+              <span class="report-card-icon report-card-icon--info">📝</span>
+              OCR 提取文字
+            </span>
+            <span class="ocr-toggle-icon" :class="{ 'ocr-toggle-icon--open': ocrExpanded }">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </span>
+          </button>
+          <transition name="slide">
+            <div v-if="ocrExpanded" class="ocr-body">
+              <pre class="ocr-text">{{ report.ocr_text }}</pre>
+            </div>
+          </transition>
         </div>
       </section>
     </transition>
@@ -467,7 +569,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { analyzeProduct, saveConfig, getConfigStatus, testApiConfig } from './api.js'
+import { analyzeProduct, saveConfig, getConfigStatus, testApiConfig, fetchModels } from './api.js'
 
 // =====================================================
 // 状态：分析流程
@@ -480,6 +582,7 @@ const loading = ref(false)
 const error = ref('')
 const report = ref(null)
 const analysisMode = ref(null) // 'real_api' | 'mock'
+const ocrExpanded = ref(false)
 
 // =====================================================
 // 状态：配置面板
@@ -490,11 +593,14 @@ const configTesting = ref(false)
 const configStatusMessage = ref('')
 const configStatusType = ref('success')
 const showApiKey = ref(false)
+const modelList = ref([])
+const fetchingModels = ref(false)
+const modelFetchError = ref('')
 
 const configForm = ref({
-  base_url: 'https://api.openai.com/v1',
+  base_url: 'https://api.deepseek.com',
   api_key: '',
-  model: 'gpt-4o-mini',
+  model: 'deepseek-v4-flash',
   extra_prompt: '',
 })
 
@@ -514,8 +620,8 @@ onMounted(async () => {
   try {
     const status = await getConfigStatus()
     configStatus.value = status
-    configForm.value.base_url = status.base_url || 'https://api.openai.com/v1'
-    configForm.value.model = status.model || 'gpt-4o-mini'
+    configForm.value.base_url = status.base_url || 'https://api.deepseek.com'
+    configForm.value.model = status.model || 'deepseek-v4-flash'
   } catch (e) {
     // 后端未启动时静默处理
   }
@@ -583,6 +689,40 @@ async function handleTestApiConfig() {
     configStatusType.value = 'error'
   } finally {
     configTesting.value = false
+  }
+}
+
+async function handleFetchModels() {
+  fetchingModels.value = true
+  modelFetchError.value = ''
+  modelList.value = []
+
+  // 先保存当前 base_url 和 api_key，让后端能认到
+  try {
+    await saveConfig({
+      base_url: configForm.value.base_url,
+      api_key: configForm.value.api_key,
+      model: configForm.value.model,
+    })
+  } catch (e) {
+    // 忽略保存失败，继续尝试拉取
+  }
+
+  try {
+    const result = await fetchModels()
+    if (result.success && result.models.length) {
+      modelList.value = result.models
+      // 自动选择第一个模型
+      if (!result.models.includes(configForm.value.model)) {
+        configForm.value.model = result.models[0]
+      }
+    } else {
+      modelFetchError.value = result.message || '获取模型列表失败'
+    }
+  } catch (err) {
+    modelFetchError.value = err.response?.data?.detail || err.message
+  } finally {
+    fetchingModels.value = false
   }
 }
 
@@ -906,6 +1046,36 @@ async function startAnalysis() {
   margin-top: 4px;
 }
 
+.form-hint--error {
+  color: var(--color-danger);
+}
+
+.form-hint--success {
+  color: var(--color-safe);
+}
+
+.model-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.model-input-row .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.model-select-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-select {
+  appearance: auto;
+  cursor: pointer;
+  padding-right: 8px;
+}
+
 .password-wrapper {
   position: relative;
 }
@@ -965,6 +1135,18 @@ async function startAnalysis() {
   background: var(--color-primary-hover);
   box-shadow: 0 2px 8px var(--color-primary-glow);
   transform: translateY(-1px);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--color-primary);
+  border: 1.5px solid var(--color-primary);
+  padding: 9px 16px;
+  font-size: 13px;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--color-primary-light);
 }
 
 .config-btn-row {
@@ -1381,6 +1563,9 @@ async function startAnalysis() {
 .report-card:nth-child(4) { animation-delay: 0.15s; }
 .report-card:nth-child(5) { animation-delay: 0.2s; }
 .report-card:nth-child(6) { animation-delay: 0.25s; }
+.report-card:nth-child(7) { animation-delay: 0.3s; }
+.report-card:nth-child(8) { animation-delay: 0.35s; }
+.report-card:nth-child(9) { animation-delay: 0.4s; }
 
 .report-card-title {
   font-size: 16px;
@@ -1668,6 +1853,166 @@ async function startAnalysis() {
   line-height: 1.6;
   max-width: 480px;
   margin: 0 auto;
+}
+
+/* ============================================================
+   事实核查
+   ============================================================ */
+
+.fact-check-item {
+  padding: 14px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.fact-check-item:last-child {
+  border-bottom: none;
+}
+
+.fact-check-claim {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+  margin-bottom: 6px;
+}
+
+.fact-check-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.fact-check-summary {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+  padding-left: 4px;
+}
+
+.fact-check-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 4px;
+}
+
+.fact-check-sources-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.fact-check-link {
+  font-size: 13px;
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 2px 10px;
+  background: var(--color-primary-light);
+  border-radius: 4px;
+  transition: all var(--transition-fast);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fact-check-link:hover {
+  background: #dde0ff;
+  color: var(--color-primary-hover);
+}
+
+/* ============================================================
+   关键词标签
+   ============================================================ */
+
+.keyword-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.keyword-tag {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+.keyword-tag--high {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.keyword-tag--medium {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+
+.keyword-empty {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+}
+
+/* ============================================================
+   OCR 折叠面板
+   ============================================================ */
+
+.ocr-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  padding: 0;
+}
+
+.ocr-toggle-icon {
+  color: var(--color-text-tertiary);
+  display: flex;
+  align-items: center;
+  transition: transform var(--transition);
+}
+
+.ocr-toggle-icon--open {
+  transform: rotate(180deg);
+  color: var(--color-primary);
+}
+
+.ocr-body {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ocr-text {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--color-text-secondary);
+  background: #f8fafc;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: "SF Mono", "Fira Code", "Noto Sans SC", monospace;
 }
 
 /* ============================================================
