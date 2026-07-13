@@ -109,6 +109,11 @@ def process_one(case, api_url, timeout, threshold=6, explanations_dir=None):
                 )
 
             explanation = report.get("detailed_analysis", "")[:500]
+            breakdown = report.get("score_breakdown", {})
+            score_str = "/".join(str(breakdown.get(k, 0)) for k in
+                                 ["pseudoscience", "false_medical", "fake_authority",
+                                  "illegal_mlm", "deceptive_marketing", "data_fraud",
+                                  "trusted_signals"])
 
             return {
                 **case,
@@ -119,25 +124,30 @@ def process_one(case, api_url, timeout, threshold=6, explanations_dir=None):
                 "keywords": report.get("detected_keywords", {}).get("all_matched", []),
                 "claims": report.get("suspicious_claims", []),
                 "explanation": explanation,
+                "score_breakdown": breakdown,
+                "triggered_items": report.get("triggered_items", []),
+                "score_detail": score_str,
             }
     except Exception as e:
         return {**case, "model_output": "error", "latency": round(time.time() - start, 2), "risk_level": 0, "error": True, "error_msg": str(e)[:80]}
 
 
 def write_csv(path, results):
-    """Write results back to CSV with explanations."""
+    """Write results back to CSV with score breakdown."""
     is_text = any(r.get("is_text") for r in results)
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         header_col = "text" if is_text else "url"
-        w.writerow([header_col, "model_output", "ground_truth", "risk_level", "explanation"])
+        w.writerow([header_col, "model_output", "ground_truth", "risk_level",
+                     "score_breakdown", "triggered_items"])
         for r in results:
             w.writerow([
                 r["input"],
                 r["model_output"],
                 r.get("ground_truth", ""),
                 r.get("risk_level", ""),
-                r.get("explanation", ""),
+                r.get("score_detail", ""),
+                "; ".join(r.get("triggered_items", [])),
             ])
     print(f"Updated CSV: {path}")
 

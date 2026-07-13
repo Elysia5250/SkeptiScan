@@ -372,22 +372,48 @@ def search_claims(claims: list[str], max_results_per_query: int = 3) -> list[dic
 
 def build_fact_check_prompt(fact_results: list[dict]) -> str:
     """
-    将事实核查结果构建为提示词片段，供 AI 分析时参考使用
+    将事实核查结果构建为提示词片段，供 AI 分析时参考使用。
+    改进版：包含搜索摘要、每个来源的标题和正文片段，以及聚合结论。
     """
     if not fact_results:
         return ""
 
     parts = ["\n【联网事实核查参考信息】"]
-    for item in fact_results:
-        parts.append(f"\n可疑声称: {item['claim']}")
-        parts.append(f"核查摘要: {item['summary']}")
+    parts.append("以下信息来自搜索引擎交叉验证，请结合你的分析使用：")
+    parts.append("")
+
+    for idx, item in enumerate(fact_results, 1):
+        parts.append(f"[{idx}] 可疑声称: {item['claim']}")
+        parts.append(f"    核查摘要: {item['summary']}")
         sources = item.get("sources", [])
         if sources:
-            parts.append(f"数据来源: {' + '.join(sources)}")
+            parts.append(f"    数据来源: {', '.join(sources)}")
+
         if item["results"]:
-            parts.append("相关来源:")
+            parts.append("    搜索到的相关资料:")
             for r in item["results"][:3]:
-                parts.append(f"  - [{r.get('source','web')}] {r['title'][:60]}")
-                parts.append(f"    {r['href']}")
+                title = r.get("title", "")
+                body = r.get("body", "")
+                href = r.get("href", "")
+                src = r.get("source", "web")
+                if body:
+                    parts.append(f"    - [{src}] {title[:50]}")
+                    parts.append(f"      摘要: {body[:150]}")
+                    parts.append(f"      链接: {href}")
+                else:
+                    parts.append(f"    - [{src}] {title[:60]}")
+        parts.append("")
+
+    # 聚合结论
+    risk_signals = []
+    for item in fact_results:
+        s = item.get("summary", "")
+        if "风险" in s or "误导" in s or "骗局" in s:
+            risk_signals.append(item["claim"])
+
+    if risk_signals:
+        parts.append("【检索聚合结论】")
+        parts.append(f"搜索结果显示以下声称存在风险信号: {'; '.join(risk_signals[:3])}")
+        parts.append("建议在评分时参考这些线索。")
 
     return "\n".join(parts)
