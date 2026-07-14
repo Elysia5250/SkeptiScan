@@ -1,4 +1,4 @@
-# 🛡️ 反噶韭菜商品风险分析工具 v2.0II
+# 🛡️ 反噶韭菜商品风险分析工具 v2.0VI
 
 上传商品截图、输入商品链接或直接粘贴商品文案，系统自动提取文字、识别可疑营销话术，并通过联网事实核查交叉验证，生成一份结构化风险分析报告。帮你和家中的长辈识别消费陷阱，远离智商税。
 
@@ -25,11 +25,14 @@ anti-leek-checker/
 │   ├── models.py                # SQLAlchemy 数据模型
 │   ├── services/
 │   │   ├── ai_analyzer.py       # AI 分析模块（10 级风险评分 + Markdown 解释）
+│   │   ├── prompt_builder.py    # 分层 prompt 构建器（SillyTavern 风格）
+│   │   ├── experience_db.py     # 自学习纠正记录（SQLite + 相似检索）
 │   │   ├── html_extractor.py    # 网页正文快速提取（httpx + lxml）
 │   │   ├── screenshot.py        # Playwright 截图（降级备用）
 │   │   ├── ocr.py               # OCR 图片文字提取（Tesseract）
 │   │   ├── fact_checker.py      # 联网事实核查（多搜索引擎）
-│   │   └── risk_rules.py        # 关键词规则检测
+│   │   ├── risk_rules.py        # 关键词规则检测
+│   │   └── scam_knowledge_base.py # 伪科学/骗局知识库
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/
@@ -153,13 +156,29 @@ external 模式：事实核查结果注入第二轮增强分析
 | v2 | 100 条中等 | 混入合规信息/注册号 | **95%** |
 | v3 | 100 条最难 | 偷换概念/让步/钓鱼/混淆样本 | **87%** |
 
-v3 测试涵盖：经典骗局案例加工、偷换概念型广告（引用不相关研究）、让步免责型（"不替代药品但…"）、钓鱼后续收费型、听起来像骗局的真实产品。通过多轮迭代（KB 知识库 + Few-shot 对抗样本 + 让步免责检测），准确率从 70% 逐步提升至 87%。
+v3 测试涵盖：经典骗局案例加工、偷换概念型广告（引用不相关研究）、让步免责型（"不替代药品但…"）、钓鱼后续收费型、听起来像骗局的真实产品。通过多轮迭代（KB 知识库 + Few-shot 对抗样本 + 让步免责检测 + 自学习），准确率从 70% 逐步提升至 87%。
+
+> v2.0VI 新增自学习系统：用户可通过前端"纠正"按钮提交反馈，系统自动从历史纠正中提取相似案例注入 prompt，持续自我改进。
 
 详细报告和解释文件见 `tests/archive/`。
 
 ## 版本日志
 
 <details open>
+<summary><b>v2.0VI</b> (2026-07-13) — self-learning + layered prompt</summary>
+<br>
+
+- [x] **自学习系统**：用户通过前端"纠正"按钮提交意见 → `experience_db.py` SQLite 存储 → 下次分析自动检索相似历史注入 prompt
+- [x] **分层 prompt 构建器**：`prompt_builder.py` — SillyTavern 风格 JSON 分层组装（system/extra/learning/KB/fact-check/user）
+- [x] **每一层有唯一标识** `_layer` + `_label`，便于 debug 和排序
+- [x] **`POST /api/analyze/feedback`**：前端提交纠正的接口
+- [x] **纠正弹窗**：分析结果底部"纠正"按钮 → 选择正确 verdict + 备注
+- [x] **纯文本输入**：前端支持直接粘贴商品文案，互斥图片/URL/文本三种输入
+- [x] **状态指示器**：分析中实时显示当前步骤（文字提取→KB 预检→AI 调用→深入分析）
+- [x] **查看测试报告**：前端底部按钮，打开最新 benchmark 报告
+</details>
+
+<details>
 <summary><b>v2.0V</b> (2026-07-13) — 87% accuracy</summary>
 <br>
 
