@@ -21,7 +21,7 @@ const api = axios.create({
  * @param {string|null} url - 商品链接
  * @returns {Promise<object>} { success, mode, report }
  */
-export async function analyzeProduct(image = null, url = null) {
+export async function analyzeProduct(image = null, url = null, text = null) {
   const formData = new FormData()
 
   if (image) {
@@ -30,11 +30,14 @@ export async function analyzeProduct(image = null, url = null) {
   if (url) {
     formData.append('url', url)
   }
+  if (text) {
+    formData.append('text', text)
+  }
   formData.append('mode', 'external')
 
   const response = await axios.post('/api/analyze', formData, {
     baseURL: '',
-    timeout: 120000, // 大模型分析需要更长超时
+    timeout: 120000,
     headers: {
       'Content-Type': 'multipart/form-data',
     },
@@ -97,6 +100,26 @@ export async function getStatus() {
  */
 export async function fetchModels() {
   const response = await api.post('/api/models/list')
+  return response.data
+}
+
+/**
+ * 提交分析纠正意见
+ * @param {string} originalText - 原始文案
+ * @param {string} originalVerdict - 原判断 (scam/not_scam/error)
+ * @param {string} correctedVerdict - 纠正判断 (scam/not_scam)
+ * @param {number} riskLevel - 建议风险等级
+ * @param {string} notes - 备注
+ */
+export async function submitFeedback(originalText, originalVerdict, correctedVerdict, riskLevel = 0, notes = '') {
+  const formData = new FormData()
+  formData.append('original_text', originalText)
+  formData.append('original_verdict', originalVerdict)
+  formData.append('corrected_verdict', correctedVerdict)
+  formData.append('risk_level', String(riskLevel))
+  formData.append('notes', notes)
+
+  const response = await api.post('/api/analyze/feedback', formData)
   return response.data
 }
 

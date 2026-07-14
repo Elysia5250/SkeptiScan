@@ -42,6 +42,11 @@ from services.ocr import extract_text, get_ocr_engine_name
 from services.html_extractor import extract_page_text
 from services.fact_checker import search_claims, build_fact_check_prompt, is_search_available
 from services.scam_knowledge_base import scan_text, build_kb_context
+from services.prompt_builder import build_system_prompt, Layer
+from services.experience_db import build_learning_context, init_db
+
+# 初始化经验数据库
+init_db()
 
 # ---------------------------------------------------------------------------
 # Mock 报告（无 API Key 或 API 调用失败时使用）
@@ -229,11 +234,10 @@ def _call_api(
     source_type: Optional[str] = None,
     fact_check_context: Optional[str] = None,
     kb_context: Optional[str] = None,
+    learning_context: Optional[str] = None,
 ) -> dict:
     """
-    使用 OpenAI SDK 调用大模型 API
-    支持注入 KB 预检结果和联网事实核查结果。
-    返回中包含 score_breakdown，后端据此计算 risk_level。
+    使用 OpenAI SDK 调用大模型 API（分层 prompt 注入）
     """
     from openai import OpenAI
 
@@ -243,21 +247,26 @@ def _call_api(
     model = ai_config["model"]
     extra_prompt = ai_config["extra_prompt"]
 
-    messages = []
+    # 使用 prompt_builder 分层组装 system messages
+    system_msgs = build_system_prompt(
+        base_prompt=BASE_SYSTEM_PROMPT,
+        extra_prompt=extra_prompt,
+        learning_context=learning_context,
+        kb_context=kb_context,
+        fact_check_context=fact_check_context,
+    )
 
-    # 第1层：BASE_SYSTEM_PROMPT
-    messages.append({"role": "system", "content": BASE_SYSTEM_PROMPT})
-
-    # 第2层：EXTRA_PROMPT（如果用户配置了额外提示词）
-    if extra_prompt:
-        messages.append({
-            "role": "system",
-            "content": f"以下是用户补充的分析要求，请在不违反基础规则的前提下参考：\n{extra_prompt}"
+    # 用户输入层
+    user_prompt = _build_user_prompt(product_text, url, source_type)
+    if user_prompt:
+        system_msgs.append({
+            "role": "user",
+            "content": user_prompt,
+            "_layer": "user_input",
+            "_label": "用户商品信息",
         })
 
-    # 第3层：USER_PROMPT（含 KB + 事实核查上下文）
-    user_prompt = _build_user_prompt(product_text, url, source_type, fact_check_context, kb_context)
-    messages.append({"role": "user", "content": user_prompt})
+    messages = system_msgs
 
     # 调用 API
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0)
@@ -385,10 +394,18 @@ def analyze_product(image_path: Optional[str] = None, url: Optional[str] = None,
                       f"{len(kb_result['red_flags'])} 个可疑模式, "
                       f"估算分: {sum(kb_estimates.values())}")
 
-    # ---- Step 3: AI 分析（注入 KB 预检结果） ----
+    # ---- Step 3: 自学习检索（从历史纠正中提取经验） ----
+    learning_context = None
+    if product_text:
+        learning_context = build_learning_context(product_text)
+        if learning_context:
+            print(f"[Learn] 检索到历史纠正经验 ({len(learning_context)} 字符)")
+
+    # ---- Step 4: AI 分析（注入 KB + 自学习结果） ----
     if has_api_key():
         try:
-            report = _call_api(product_text, url, source_type, kb_context=kb_context)
+            report = _call_api(product_text, url, source_type,
+                               kb_context=kb_context, learning_context=learning_context)
             mode = "real_api"
         except Exception as e:
             print(f"[Warning] API 调用失败，降级到 Mock 模式: {_safe_error(e)}")
@@ -417,12 +434,13 @@ def analyze_product(image_path: Optional[str] = None, url: Optional[str] = None,
                             fact_context = build_fact_check_prompt(fact_results)
                             enhanced_report = _call_api(product_text, url, source_type,
                                                         fact_check_context=fact_context,
-                                                        kb_context=kb_context)
+                                                        kb_context=kb_context,
+                                                        learning_context=learning_context)
                             if product_text:
                                 enhanced_report["extracted_text"] = product_text[:2000]
                             enhanced_report["fact_check_results"] = fact_results
                             report = enhanced_report
-                            print("[FactCheck] 已注入事实核查+KB结果进行增强分析")
+                            print("[FactCheck] 已注入事实核查+KB+自学习结果进行增强分析")
                         except Exception as e:
                             print(f"[Warning] 增强分析失败，使用原始报告: {_safe_error(e)}")
             except Exception as e:

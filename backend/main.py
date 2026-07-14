@@ -75,13 +75,15 @@ app.add_middleware(
 UPLOAD_DIR = Path("data/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+REPORT_DIR = Path(__file__).parent.parent / "tests" / "output"
+
 
 # ---------------------------------------------------------------------------
 # 全局异常处理器：防止 debug 模式下泄露函数参数（含 API Key）
 # ---------------------------------------------------------------------------
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, HTMLResponse
 
 
 @app.exception_handler(Exception)
@@ -108,6 +110,19 @@ async def root():
         "status": "running",
         "timestamp": datetime.now().isoformat(),
     }
+
+
+@app.get("/api/report/latest")
+async def latest_report():
+    """返回最新的基准测试报告 HTML"""
+    report_path = REPORT_DIR / "benchmark_report.html"
+    if report_path.exists():
+        content = report_path.read_text(encoding="utf-8")
+        return HTMLResponse(content=content)
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "暂无测试报告，请先运行 benchmark"},
+    )
 
 
 @app.post("/api/config")
@@ -391,6 +406,33 @@ def analyze(
         "mode": api_mode,
         "report": report,
     }
+
+
+@app.post("/api/analyze/feedback")
+def submit_feedback(
+    original_text: str = Form(..., description="原始商品文案"),
+    original_verdict: str = Form(..., description="原判断结果 (scam/not_scam/error)"),
+    corrected_verdict: str = Form(..., description="用户纠正的判定 (scam/not_scam)"),
+    risk_level: int = Form(0, description="建议风险等级 (1-10)"),
+    notes: str = Form("", description="备注"),
+):
+    """
+    提交对分析结果的纠正意见
+    用于自学习系统积累经验
+    """
+    from services.experience_db import store
+
+    try:
+        record_id = store(
+            original_text=original_text,
+            original_verdict=original_verdict,
+            corrected_verdict=corrected_verdict,
+            risk_level=risk_level,
+            notes=notes,
+        )
+        return {"success": True, "record_id": record_id, "message": "反馈已记录"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 if __name__ == "__main__":

@@ -265,21 +265,47 @@
         </div>
       </div>
 
-      <!-- 分析按钮 -->
-      <button
-        class="analyze-btn"
-        :disabled="!canAnalyze || loading"
-        @click="startAnalysis"
-      >
-        <span v-if="loading" class="spinner"></span>
-        <template v-else>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-        </template>
-        <span>{{ loading ? '分析中...' : '开始分析' }}</span>
-      </button>
+      <!-- 分割线 -->
+      <div class="divider">
+        <span class="divider-text">或者</span>
+      </div>
+
+      <!-- 纯文本输入 -->
+      <div class="form-group">
+        <label class="form-label">粘贴商品文案</label>
+        <textarea
+          v-model="productText"
+          class="form-input form-textarea"
+          rows="4"
+          placeholder="直接粘贴商品宣传文案、产品描述、推广话术等..."
+          @input="handleTextInput"
+        ></textarea>
+        <p v-if="productText" class="form-hint">{{ productText.length }} 字符</p>
+      </div>
+
+      <!-- 分析按钮 + 状态指示 -->
+      <div class="analyze-row">
+        <button
+          class="analyze-btn"
+          :disabled="!canAnalyze || loading"
+          @click="startAnalysis"
+        >
+          <span v-if="loading" class="spinner"></span>
+          <template v-else>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </template>
+          <span>{{ loading ? '分析中' : '开始分析' }}</span>
+        </button>
+        <transition name="fade">
+          <div v-if="statusText" class="status-indicator" :class="{ 'status-done': !loading }">
+            <span class="status-dot" :class="{ 'status-dot--pulse': loading }"></span>
+            <span class="status-label">{{ statusText }}</span>
+          </div>
+        </transition>
+      </div>
     </section>
 
     <!-- ========================================== -->
@@ -507,6 +533,56 @@
           </div>
         </div>
 
+        <!-- 纠正按钮 -->
+        <div class="card report-card" style="text-align: center;">
+          <button class="btn btn-outline" @click="showFeedbackForm = true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+            </svg>
+            纠正
+          </button>
+          <p class="form-hint" style="margin-top: 6px;">如果分析结果有误，请告诉我们正确的判断</p>
+        </div>
+
+        <!-- 纠正弹窗 -->
+        <transition name="fade">
+          <div v-if="showFeedbackForm" class="modal-overlay" @click.self="showFeedbackForm = false">
+            <div class="modal-card">
+              <h3 style="margin-bottom: 16px;">提交纠正</h3>
+              <div class="form-group">
+                <label class="form-label">原始判断</label>
+                <input class="form-input" :value="analysisMode === 'real_api' ? '真实 API' : 'Mock 模式'" disabled />
+              </div>
+              <div class="form-group">
+                <label class="form-label">模型判断</label>
+                <input class="form-input" :value="modelPrediction" disabled />
+              </div>
+              <div class="form-group">
+                <label class="form-label">正确判断</label>
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn" :class="feedbackVerdict === 'scam' ? 'btn-scam' : 'btn-outline'" @click="feedbackVerdict = 'scam'">骗局 scam</button>
+                  <button class="btn" :class="feedbackVerdict === 'not_scam' ? 'btn-safe' : 'btn-outline'" @click="feedbackVerdict = 'not_scam'">安全 not_scam</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">备注（可选）</label>
+                <textarea v-model="feedbackNotes" class="form-input form-textarea" rows="3" placeholder="为什么这个判断不对？例如：漏掉了虚假宣传、误判了正规商品"></textarea>
+              </div>
+              <div class="config-btn-row">
+                <button class="btn btn-primary" :disabled="feedbackSending || !feedbackVerdict" @click="handleSubmitFeedback">
+                  {{ feedbackSending ? '提交中...' : '提交纠正' }}
+                </button>
+                <button class="btn btn-secondary" @click="showFeedbackForm = false">取消</button>
+              </div>
+              <transition name="fade">
+                <div v-if="feedbackMessage" class="config-status" :class="'config-status--' + (feedbackSuccess ? 'success' : 'error')" style="margin-top: 12px;">
+                  {{ feedbackMessage }}
+                </div>
+              </transition>
+            </div>
+          </div>
+        </transition>
+
         <!-- 风险关键词检测 -->
         <div v-if="report.detected_keywords" class="card report-card">
           <h3 class="report-card-title">
@@ -562,6 +638,18 @@
           本工具分析结果仅供参考，不构成任何购买建议或投资意见。
           若发现可疑商品，建议同时向市场监管部门举报（12315）。
         </p>
+        <div class="footer-links">
+          <a :href="reportUrl" target="_blank" class="footer-link" @click.prevent="openReport">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            查看测试报告
+          </a>
+        </div>
       </div>
     </footer>
   </div>
@@ -569,7 +657,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { analyzeProduct, saveConfig, getConfigStatus, testApiConfig, fetchModels } from './api.js'
+import { analyzeProduct, saveConfig, getConfigStatus, testApiConfig, fetchModels, submitFeedback } from './api.js'
 
 // =====================================================
 // 状态：分析流程
@@ -583,6 +671,17 @@ const error = ref('')
 const report = ref(null)
 const analysisMode = ref(null) // 'real_api' | 'mock'
 const ocrExpanded = ref(false)
+
+// 纯文本输入
+const productText = ref('')
+
+// 纠正弹窗
+const showFeedbackForm = ref(false)
+const feedbackVerdict = ref('')
+const feedbackNotes = ref('')
+const feedbackSending = ref(false)
+const feedbackMessage = ref('')
+const feedbackSuccess = ref(false)
 
 // =====================================================
 // 状态：配置面板
@@ -631,10 +730,12 @@ onMounted(async () => {
 // 计算属性
 // =====================================================
 const canAnalyze = computed(() => {
-  return selectedImage.value || url.value.trim()
+  return selectedImage.value || url.value.trim() || productText.value.trim()
 })
 
 const isDragOver = ref(false)
+const statusText = ref('')
+const statusTimer = ref(null)
 
 const configStatusClass = computed(() => {
   return configStatus.value.api_configured ? 'badge--online' : 'badge--offline'
@@ -659,6 +760,46 @@ const riskBannerClass = computed(() => {
   if (level === '中') return 'risk-banner--medium'
   return 'risk-banner--low'
 })
+
+const reportUrl = computed(() => '/api/report/latest')
+
+function openReport() {
+  window.open('/api/report/latest', '_blank')
+}
+
+const modelPrediction = computed(() => {
+  if (!report.value) return ''
+  const level = report.value.risk_level
+  return `risk_level=${level} → ${level >= 5 ? 'scam' : 'not_scam'}`
+})
+
+async function handleSubmitFeedback() {
+  if (!feedbackVerdict.value) return
+  feedbackSending.value = true
+  feedbackMessage.value = ''
+  try {
+    const result = await submitFeedback(
+      productText.value || url.value || '',
+      modelPrediction.value.includes('scam') ? 'scam' : 'not_scam',
+      feedbackVerdict.value,
+      report.value?.risk_level || 0,
+      feedbackNotes.value,
+    )
+    if (result.success) {
+      feedbackMessage.value = '✅ 反馈已记录，感谢帮助改进！'
+      feedbackSuccess.value = true
+      setTimeout(() => { showFeedbackForm.value = false; feedbackMessage.value = '' }, 1500)
+    } else {
+      feedbackMessage.value = `❌ ${result.message}`
+      feedbackSuccess.value = false
+    }
+  } catch (err) {
+    feedbackMessage.value = '❌ 提交失败：' + (err.response?.data?.detail || err.message)
+    feedbackSuccess.value = false
+  } finally {
+    feedbackSending.value = false
+  }
+}
 
 const riskIcon = computed(() => {
   if (!report.value) return ''
@@ -783,6 +924,8 @@ function handleDrop(event) {
 
 function setImage(file) {
   selectedImage.value = file
+  productText.value = ''
+  url.value = ''
   const reader = new FileReader()
   reader.onload = (e) => {
     imagePreviewUrl.value = e.target.result
@@ -799,33 +942,66 @@ function removeImage() {
 // 方法：URL 输入 & 分析
 // =====================================================
 function handleUrlInput() {
-  if (error.value) {
-    error.value = ''
-  }
+  if (error.value) error.value = ''
+  if (productText.value) productText.value = '' // 互斥
+}
+
+function handleTextInput() {
+  if (error.value) error.value = ''
+  if (url.value) url.value = '' // 互斥
+  if (selectedImage.value) removeImage()
 }
 
 async function startAnalysis() {
   error.value = ''
   report.value = null
   analysisMode.value = null
+  statusText.value = ''
 
   if (!canAnalyze.value) {
-    error.value = '请上传商品截图或输入商品链接'
+    error.value = '请输入商品截图、链接或文案'
     return
   }
 
   loading.value = true
 
+  // 状态轮播
+  const statusSteps = [
+    '正在提取文字…',
+    '正在知识库预检…',
+    '正在调用 AI 模型…',
+    '正在深入分析…',
+    '仍在分析（内容较长）…',
+  ]
+  let si = 0
+  statusText.value = statusSteps[0]
+  statusTimer.value = setInterval(() => {
+    si = Math.min(si + 1, statusSteps.length - 1)
+    statusText.value = statusSteps[si]
+  }, 4000)
+
   try {
-    const result = await analyzeProduct(selectedImage.value, url.value.trim() || null)
+    const result = await analyzeProduct(
+      selectedImage.value,
+      url.value.trim() || null,
+      productText.value.trim() || null
+    )
+
+    clearInterval(statusTimer.value)
+    statusTimer.value = null
 
     if (result.success) {
       report.value = result.report
       analysisMode.value = result.mode
+      statusText.value = '分析完成 ✓'
     } else {
+      statusText.value = '分析失败'
       error.value = '分析失败，请稍后重试'
     }
   } catch (err) {
+    clearInterval(statusTimer.value)
+    statusTimer.value = null
+    statusText.value = '分析失败'
     if (err.response) {
       error.value = `请求失败：${err.response.data?.detail || err.response.statusText}`
     } else if (err.request) {
@@ -1389,8 +1565,46 @@ async function startAnalysis() {
    分析按钮
    ============================================================ */
 
+.analyze-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.status-dot--pulse {
+  background: var(--color-primary);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.status-done .status-dot {
+  background: var(--color-safe);
+}
+
+.status-done .status-label {
+  color: var(--color-safe);
+}
+
 .analyze-btn {
-  width: 100%;
+  flex-shrink: 0;
   padding: 14px 24px;
   background: linear-gradient(135deg, var(--color-primary), #818cf8);
   color: white;
@@ -1857,6 +2071,28 @@ async function startAnalysis() {
   margin: 0 auto;
 }
 
+.footer-links {
+  margin-top: 16px;
+}
+
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: var(--color-primary-light);
+  transition: all var(--transition-fast);
+}
+
+.footer-link:hover {
+  background: #dde0ff;
+  color: var(--color-primary-hover);
+}
+
 /* ============================================================
    事实核查
    ============================================================ */
@@ -2015,6 +2251,43 @@ async function startAnalysis() {
   max-height: 300px;
   overflow-y: auto;
   font-family: "SF Mono", "Fira Code", "Noto Sans SC", monospace;
+}
+
+/* ============================================================
+   纠正弹窗
+   ============================================================ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-card {
+  background: #fff;
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 90%;
+  max-width: 440px;
+  box-shadow: var(--shadow-xl);
+  animation: scaleIn 0.2s ease-out;
+}
+
+.btn-scam {
+  background: var(--color-danger);
+  color: white;
+  flex: 1;
+}
+
+.btn-safe {
+  background: var(--color-safe);
+  color: white;
+  flex: 1;
 }
 
 /* ============================================================
