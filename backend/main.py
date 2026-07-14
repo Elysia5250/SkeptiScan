@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from database import init_db, SessionLocal
 from models import AnalysisRecord
@@ -58,7 +59,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="反噶韭菜商品风险分析工具",
     description="上传商品截图或输入商品链接，系统自动识别可疑营销话术并生成风险分析报告",
-    version="2.0.1",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -76,6 +77,12 @@ UPLOAD_DIR = Path("data/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 REPORT_DIR = Path(__file__).parent.parent / "tests" / "output"
+
+# ---------------------------------------------------------------------------
+# 前端静态文件托管（放在最后，作为 catch-all）
+# ---------------------------------------------------------------------------
+
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 # ---------------------------------------------------------------------------
@@ -102,11 +109,17 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 @app.get("/")
-async def root():
-    """健康检查接口，返回项目状态"""
+async def root(request: Request):
+    """浏览器访问返回前端，curl 访问返回 JSON 状态"""
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and FRONTEND_DIST.exists():
+        index = FRONTEND_DIST / "index.html"
+        if index.exists():
+            from starlette.responses import HTMLResponse
+            return HTMLResponse(content=index.read_text(encoding="utf-8"))
     return {
-        "name": "反噶韭菜商品风险分析工具",
-        "version": "2.0.1",
+        "name": "SkeptiScan",
+        "version": "2.0.0",
         "status": "running",
         "timestamp": datetime.now().isoformat(),
     }
@@ -433,6 +446,28 @@ def submit_feedback(
         return {"success": True, "record_id": record_id, "message": "反馈已记录"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# 前端 SPA fallback（必须放在所有 API 路由之后）
+# ---------------------------------------------------------------------------
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    """前端 SPA fallback（必须放在所有 API 路由之后）"""
+    if not full_path or full_path.startswith("api/") or full_path.startswith("data/"):
+        raise HTTPException(status_code=404)
+    if not FRONTEND_DIST.exists():
+        raise HTTPException(status_code=404)
+    index = FRONTEND_DIST / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=404)
+    from starlette.responses import HTMLResponse, FileResponse
+    file = FRONTEND_DIST / full_path
+    if file.exists() and file.is_file():
+        return FileResponse(str(file))
+    return HTMLResponse(content=index.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
