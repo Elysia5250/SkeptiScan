@@ -2,7 +2,7 @@
   <div class="app-container">
     <!-- 顶部标题 -->
     <header class="header">
-      <div class="header-badge">🛡️ 反噶韭菜</div>
+      <div class="header-badge">SkeptiScan</div>
       <h1 class="header-title">商品风险分析工具</h1>
       <p class="header-subtitle">
         上传商品截图或粘贴商品链接，系统将自动识别可疑宣传和消费风险
@@ -287,7 +287,7 @@
     <!-- ========================================== -->
     <section v-if="!report" class="tech-section">
       <div class="tech-section-header">
-        <h2 class="tech-section-title">核心技术能力</h2>
+        <h2 class="tech-section-title">                    SkeptiScan 核心技术</h2>
         <p class="tech-section-subtitle">基于前沿人工智能技术，全方位守护您的消费安全</p>
       </div>
 
@@ -556,7 +556,7 @@
       <div class="footer-divider"></div>
       <div class="footer-content">
         <p class="footer-text">
-          🛡️ 反噶韭菜 · 商品风险分析工具 —— 基于大语言模型的智能消费安全助手
+          SkeptiScan · 商品风险分析工具 —— 基于大语言模型的智能消费安全助手
         </p>
         <p class="footer-disclaimer">
           本工具分析结果仅供参考，不构成任何购买建议或投资意见。
@@ -846,7 +846,7 @@ async function startAnalysis() {
 
 .app-container {
   max-width: 100%;
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeInUp 0.6s ease-out;
 }
 
 /* ============================================================
@@ -863,14 +863,15 @@ async function startAnalysis() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
   color: var(--color-primary);
   background: var(--color-primary-light);
-  padding: 6px 14px;
+  padding: 8px 20px;
   border-radius: 20px;
   margin-bottom: 16px;
-  letter-spacing: 0.3px;
+  animation: scaleIn 0.4s ease-out 0.1s both;
 }
 
 .header-title {
@@ -888,6 +889,7 @@ async function startAnalysis() {
   max-width: 520px;
   margin: 0 auto;
   line-height: 1.6;
+  animation: fadeIn 0.5s ease-out 0.3s both;
 }
 
 /* ============================================================
